@@ -1,0 +1,65 @@
+# Business Automations: build Cal.diy for linux/amd64 from a pinned upstream commit
+# and publish it to GHCR. Manual only. `promote` moves the :stable tag.
+name: image
+on:
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: "Also tag this build as :stable"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: build
+          POSTGRES_PASSWORD: build
+          POSTGRES_DB: build
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U build"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags
+        id: tags
+        run: |
+          T="ghcr.io/${{ github.repository_owner }}/cal.diy:sha-${GITHUB_SHA::12}"
+          if [ "${{ inputs.promote }}" = "true" ]; then T="$T,ghcr.io/${{ github.repository_owner }}/cal.diy:stable"; fi
+          echo "tags=$T" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          network: host
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            NEXT_PUBLIC_LICENSE_CONSENT=agree
+            NEXT_PUBLIC_DISABLE_SIGNUP=true
+            NEXT_PUBLIC_APP_NAME=Bookings
+            NEXT_PUBLIC_COMPANY_NAME=businessautomations.ai ltd
+            NEXT_PUBLIC_SUPPORT_MAIL_ADDRESS=info@businessautomations.group
+            NEXT_PUBLIC_WEBSITE_TERMS_URL=https://businessautomations.group/terms
+            NEXT_PUBLIC_WEBSITE_PRIVACY_POLICY_URL=https://businessautomations.group/privacy
+            CALCOM_TELEMETRY_DISABLED=1
+            DATABASE_URL=postgresql://build:build@localhost:5432/build
+            NEXTAUTH_SECRET=build-placeholder
+            CALENDSO_ENCRYPTION_KEY=build-placeholder
+            MAX_OLD_SPACE_SIZE=6144
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
