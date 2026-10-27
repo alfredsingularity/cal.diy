@@ -13,7 +13,7 @@ import { Button } from "@calcom/ui/components/button";
 import { Form, Label, Select, SettingsToggle } from "@calcom/ui/components/form";
 import { Icon } from "@calcom/ui/components/icon";
 import { showToast } from "@calcom/ui/components/toast";
-import { revalidateTravelSchedules } from "@calcom/web/app/cache/travelSchedule";
+import { revalidateTravelSchedules } from "@calcom/web/app/cache/actions";
 import { TimezoneSelect } from "@calcom/web/modules/timezone/components/TimezoneSelect";
 import TravelScheduleModal from "@components/settings/TravelScheduleModal";
 import { revalidateSettingsGeneral } from "app/(use-page-wrapper)/settings/(settings-layout)/my-account/general/actions";

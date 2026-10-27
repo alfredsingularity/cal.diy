@@ -70,14 +70,13 @@ export async function detectContentType(buffer: Buffer): Promise<string | null> 
   try {
     const meta = await sharp(buffer).metadata();
     switch (meta?.format) {
-      case "avif":
-        return AVIF;
+      case "heif":
+        return meta.compression === "av1" ? AVIF : null;
       case "webp":
         return WEBP;
       case "png":
         return PNG;
       case "jpeg":
-      case "jpg":
         return JPEG;
       case "gif":
         return GIF;

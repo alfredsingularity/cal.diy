@@ -1,26 +1,27 @@
-"use server";
+import "server-only";
 
 import { MembershipRepository } from "@calcom/features/membership/repositories/MembershipRepository";
 import { NEXTJS_CACHE_TTL } from "@calcom/lib/constants";
-import { revalidateTag, unstable_cache } from "next/cache";
+import { unstable_cache } from "next/cache";
+import { requireUserId } from "./requireUserId";
 
-const CACHE_TAGS = {
-  HAS_TEAM_PLAN: "MembershipRepository.hasAnyAcceptedMembershipByUserId",
-} as const;
+export const getHasTeamPlanCacheTag = (userId: number) =>
+  `MembershipRepository.hasAnyAcceptedMembershipByUserId:${userId}`;
 
-export const getCachedHasTeamPlan = unstable_cache(
-  async (userId: number) => {
-    const hasTeamPlan = await MembershipRepository.hasAnyAcceptedMembershipByUserId(userId);
+export const getCachedHasTeamPlan = async (requestedUserId: number) => {
+  // Authorization must run on cache hits as well as misses.
+  const userId = await requireUserId(requestedUserId);
 
-    return { hasTeamPlan: !!hasTeamPlan };
-  },
-  ["getCachedHasTeamPlan"],
-  {
-    revalidate: NEXTJS_CACHE_TTL,
-    tags: [CACHE_TAGS.HAS_TEAM_PLAN],
-  }
-);
+  return unstable_cache(
+    async (id: number) => {
+      const hasTeamPlan = await MembershipRepository.hasAnyAcceptedMembershipByUserId(id);
 
-export const revalidateHasTeamPlan = async () => {
-  revalidateTag(CACHE_TAGS.HAS_TEAM_PLAN, "max");
+      return { hasTeamPlan: !!hasTeamPlan };
+    },
+    ["getCachedHasTeamPlan", getHasTeamPlanCacheTag(userId)],
+    {
+      revalidate: NEXTJS_CACHE_TTL,
+      tags: [getHasTeamPlanCacheTag(userId)],
+    }
+  )(userId);
 };

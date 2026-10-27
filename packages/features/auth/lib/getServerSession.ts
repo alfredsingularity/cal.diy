@@ -1,7 +1,6 @@
 import { UserRepository } from "@calcom/features/users/repositories/UserRepository";
 import { getUserAvatarUrl } from "@calcom/lib/getAvatarUrl";
 import logger from "@calcom/lib/logger";
-import { safeStringify } from "@calcom/lib/safeStringify";
 import prisma from "@calcom/prisma";
 import { LRUCache } from "lru-cache";
 import type { GetServerSidePropsContext, NextApiRequest } from "next";
@@ -47,7 +46,7 @@ export async function getServerSession(options: {
     secret,
   });
 
-  log.debug("Getting server session", safeStringify({ token }));
+  log.debug("Getting server session");
 
   if (!token || !token.email || !token.sub) {
     log.debug("Couldn't get token");
@@ -57,14 +56,14 @@ export async function getServerSession(options: {
   const cachedSession = CACHE.get(JSON.stringify(token));
 
   if (cachedSession) {
-    log.debug("Returning cached session", safeStringify(cachedSession));
+    log.debug("Returning cached session");
     return cachedSession;
   }
 
   const userId = token.sub ? Number(token.sub) : null;
 
   if (!userId || userId <= 0) {
-    log.warn("Invalid or missing user ID in token", { sub: token.sub });
+    log.warn("Invalid or missing user ID in token");
     return null;
   }
 
@@ -73,7 +72,7 @@ export async function getServerSession(options: {
   });
 
   if (!userFromDb) {
-    log.warn("No user found for valid token", { userId });
+    log.warn("No user found for valid token");
     return null;
   }
 
@@ -88,7 +87,7 @@ export async function getServerSession(options: {
   }
 
   if (!upId) {
-    log.error("No upId found for session", { userId: userFromDb.id });
+    log.error("No upId found for session");
     return null;
   }
 
@@ -146,6 +145,6 @@ export async function getServerSession(options: {
 
   CACHE.set(JSON.stringify(token), session);
 
-  log.debug("Returned session", safeStringify(session));
+  log.debug("Returned session");
   return session;
 }

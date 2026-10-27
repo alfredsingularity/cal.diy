@@ -1,7 +1,7 @@
 "use client";
 
 import { revalidateSettingsAppearance } from "app/(use-page-wrapper)/settings/(settings-layout)/my-account/appearance/actions";
-import { revalidateHasTeamPlan } from "app/cache/membership";
+import { revalidateHasTeamPlan } from "app/cache/actions";
 import { useSession } from "next-auth/react";
 import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
