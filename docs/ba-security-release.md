@@ -6,7 +6,7 @@ The security patch retains public booking behavior while checking the signed-in 
 
 Run the manual `image` workflow on the reviewed commit with `promote=false`. It publishes a candidate `sha-<commit>` tag; the tag is not evidence of verification. The subsequent no-network gate resolves the exact build digest and checks Node/Next/Sharp/librsvg versions, native SVG conversion, every installed Next/Sharp package copy and every JSON Server Action manifest. Missing or unknown metadata fails the gate without printing action IDs or generated keys. Only a successful gate permits optional stable promotion by digest. The workflow does not deploy Railway.
 
-Use an amd64 runner. The current Dockerfile builds native dependencies for BUILDPLATFORM and is not a general cross-architecture recipe.
+Build with `--platform linux/amd64` for the Railway candidate. Every stage uses that target platform so native dependencies and the runtime agree; an arm64 workstation must emulate amd64 for the build. Record the image architecture and test the native dependencies inside the resulting image.
 
 ## Release evidence
 

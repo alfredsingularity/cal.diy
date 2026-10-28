@@ -25,6 +25,9 @@ async function verify() {
   const lib = createRequire(path.join(root, "packages/lib/package.json"));
   const source = await readJson(path.join(root, "apps/web/package.json"));
   const nextVersion = web("next/package.json").version;
+  const nextAuthVersion = web("next-auth/package.json").version;
+  check(nextAuthVersion === "4.24.15", "NextAuth runtime differs from the reviewed security baseline");
+  check(process.arch === "x64", "Railway candidate must contain amd64 native dependencies");
   check(nextVersion === source.dependencies.next && nextVersion === "16.4.1", "Web Next resolution differs from the reviewed security baseline");
   check(process.versions.node === "22.23.4", "Node runtime differs from the reviewed security baseline");
 
@@ -44,11 +47,11 @@ async function verify() {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const file = path.join(directory, entry.name);
       if (entry.isDirectory()) await inspect(file);
-      else if (entry.name === "package.json" && file.includes(`${path.sep}node_modules${path.sep}`) && ["next", "sharp"].includes(path.basename(directory))) {
+      else if (entry.name === "package.json" && file.includes(`${path.sep}node_modules${path.sep}`) && ["next", "sharp", "next-auth"].includes(path.basename(directory))) {
         const metadata = await readJson(file);
-        if (!["next", "sharp"].includes(metadata.name)) continue;
-        const expected = metadata.name === "next" ? "16.4.1" : "0.35.5";
-        check(metadata.version === expected, "An installed Next or Sharp copy is outside the reviewed security baseline");
+        if (!["next", "sharp", "next-auth"].includes(metadata.name)) continue;
+        const expected = { next: "16.4.1", sharp: "0.35.5", "next-auth": "4.24.15" }[metadata.name];
+        check(metadata.version === expected, "An installed Next, NextAuth or Sharp copy is outside the reviewed security baseline");
         packageCopies.push({ path: path.relative(root, directory), name: metadata.name, version: metadata.version });
       } else if (entry.name === "server-reference-manifest.json") {
         manifests++;
@@ -79,7 +82,7 @@ async function verify() {
   await inspect(root);
   check(manifests > 0 && references.size > 0, "Missing action manifests cannot prove getter removal");
   check(packageCopies.some(copy => copy.name === "next") && packageCopies.some(copy => copy.name === "sharp"), "Missing dependency inventory");
-  console.log(JSON.stringify({ passed: true, node: process.versions.node, next: nextVersion, sharp: "0.35.5", librsvg: "2.63.2", manifests, uniqueActionReferences: references.size, publicActionExports: [...actionExports].sort(), packageCopies }));
+  console.log(JSON.stringify({ passed: true, node: process.versions.node, next: nextVersion, nextAuth: nextAuthVersion, architecture: process.arch, sharp: "0.35.5", librsvg: "2.63.2", manifests, uniqueActionReferences: references.size, publicActionExports: [...actionExports].sort(), packageCopies }));
 }
 
 try {
