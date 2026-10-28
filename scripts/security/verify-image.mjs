@@ -25,8 +25,9 @@ async function verify() {
   const lib = createRequire(path.join(root, "packages/lib/package.json"));
   const source = await readJson(path.join(root, "apps/web/package.json"));
   const nextVersion = web("next/package.json").version;
-  const nextAuthVersion = web("next-auth/package.json").version;
-  check(nextAuthVersion === "4.24.15", "NextAuth runtime differs from the reviewed security baseline");
+  const nextAuthPackage = await readJson(path.join(path.dirname(web.resolve("next-auth")), "package.json"));
+  const nextAuthVersion = nextAuthPackage.version;
+  check(nextAuthPackage.name === "next-auth" && nextAuthVersion === "4.24.15", "NextAuth runtime differs from the reviewed security baseline");
   check(process.arch === "x64", "Railway candidate must contain amd64 native dependencies");
   check(nextVersion === source.dependencies.next && nextVersion === "16.4.1", "Web Next resolution differs from the reviewed security baseline");
   check(process.versions.node === "22.23.4", "Node runtime differs from the reviewed security baseline");
