@@ -24,7 +24,7 @@ const travelScheduleSelect = {
 async function postHandler(request: NextRequest) {
   const apiKey = request.headers.get("authorization") || request.nextUrl.searchParams.get("apiKey");
 
-  if (process.env.CRON_API_KEY !== apiKey) {
+  if (!process.env.CRON_API_KEY?.trim() || process.env.CRON_API_KEY !== apiKey) {
     return NextResponse.json({ message: "Not authenticated" }, { status: 401 });
   }
 

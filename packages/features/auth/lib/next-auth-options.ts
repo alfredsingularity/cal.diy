@@ -29,7 +29,6 @@ import { defaultCookies } from "@calcom/lib/default-cookies";
 import { isENVDev } from "@calcom/lib/env";
 import logger from "@calcom/lib/logger";
 import { randomString } from "@calcom/lib/random";
-import { safeStringify } from "@calcom/lib/safeStringify";
 import { hashEmail } from "@calcom/lib/server/PiiHasher";
 import slugify from "@calcom/lib/slugify";
 import type { TrackingData } from "@calcom/lib/tracking";
@@ -95,6 +94,24 @@ const AdapterAccountPresenter = {
 };
 
 const log = logger.getSubLogger({ prefix: ["next-auth-options"] });
+
+const getAuthErrorDiagnostic = (error: unknown): { errorType: string } => {
+  // Provider and database errors can embed credentials or personal data in messages and request objects.
+  const errorType = error instanceof Error ? error.name : "UnknownError";
+  const safeErrorTypes = [
+    "Error",
+    "TypeError",
+    "SyntaxError",
+    "FetchError",
+    "GaxiosError",
+    "PrismaClientKnownRequestError",
+    "PrismaClientUnknownRequestError",
+    "PrismaClientValidationError",
+    "PrismaClientInitializationError",
+  ];
+  return { errorType: safeErrorTypes.includes(errorType) ? errorType : "UnknownError" };
+};
+
 const GOOGLE_API_CREDENTIALS = process.env.GOOGLE_API_CREDENTIALS || "{}";
 const { client_id: GOOGLE_CLIENT_ID, client_secret: GOOGLE_CLIENT_SECRET } =
   JSON.parse(GOOGLE_API_CREDENTIALS)?.web || {};
@@ -151,7 +168,8 @@ const checkIfUserShouldBelongToOrg = async (idP: IdentityProvider, email: string
 export async function authorizeCredentials(
   credentials: Record<"email" | "password" | "totpCode" | "backupCode", string> | undefined
 ): Promise<User | null> {
-  log.debug("CredentialsProvider:credentials:authorize", safeStringify({ credentials }));
+  // Never serialize credentials, tokens or provider payloads, even at debug level.
+  log.debug("CredentialsProvider:credentials:authorize");
   if (!credentials) {
     console.error(`For some reason credentials are missing`);
     throw new Error(ErrorCode.InternalServerError);
@@ -216,7 +234,7 @@ export async function authorizeCredentials(
     }
 
     if (!user.twoFactorSecret) {
-      console.error(`Two factor is enabled for user ${user.id} but they have no secret`);
+      console.error("Two factor is enabled but the user has no secret");
       throw new Error(ErrorCode.InternalServerError);
     }
 
@@ -388,7 +406,7 @@ export const getOptions = ({
     // decorate the native JWT encode function
     // Impl. detail: We don't pass through as this function is called with encode/decode functions.
     encode: async ({ token, maxAge, secret }) => {
-      log.debug("jwt:encode", safeStringify({ token, maxAge }));
+      log.debug("jwt:encode");
       if (token?.sub && isNumber(token.sub)) {
         const user = await prisma.user.findFirst({
           where: { id: Number(token.sub) },
@@ -427,7 +445,7 @@ export const getOptions = ({
       // Available only in the first call once the user signs in. Not available in subsequent calls
       account,
     }) {
-      log.debug("callbacks:jwt", safeStringify({ token, user, account, trigger, session }));
+      log.debug("callbacks:jwt");
       // The data available in 'session' depends on what data was supplied in update method call of session
       if (trigger === "update") {
         return {
@@ -473,12 +491,7 @@ export const getOptions = ({
         const belongsToActiveTeam = checkIfUserBelongsToActiveTeam(existingUser);
         const { teams: _teams, ...existingUserWithoutTeamsField } = existingUser;
         const allProfiles = await ProfileRepository.findAllProfilesForUserIncludingMovedUser(existingUser);
-        log.debug(
-          "callbacks:jwt:autoMergeIdentities",
-          safeStringify({
-            allProfiles,
-          })
-        );
+        log.debug("callbacks:jwt:autoMergeIdentities");
         const { upId } = determineProfile({ profiles: allProfiles, token });
 
         const profile = await ProfileRepository.findByUpIdWithAuth(upId, existingUser.id);
@@ -532,7 +545,7 @@ export const getOptions = ({
         return token;
       }
       if (account.type === "credentials") {
-        log.debug("callbacks:jwt:accountType:credentials", safeStringify({ account }));
+        log.debug("callbacks:jwt:accountType:credentials");
         // return token if credentials,saml-idp
         if (account.provider === "saml-idp") {
           const samlIdpUser = user as SamlIdpUser;
@@ -566,7 +579,7 @@ export const getOptions = ({
       // The arguments above are from the provider so we need to look up the
       // user based on those values in order to construct a JWT.
       if (account.type === "oauth") {
-        log.debug("callbacks:jwt:accountType:oauth", safeStringify({ account }));
+        log.debug("callbacks:jwt:accountType:oauth");
         if (!account.provider || !account.providerAccountId) {
           return { ...token, upId: user.profile?.upId ?? token.upId ?? null } as JWT;
         }
@@ -715,7 +728,10 @@ export const getOptions = ({
               }
             }
           } catch (error) {
-            log.error("Failed to fetch default calendar for Microsoft sign-in", error);
+            log.error(
+              "Failed to fetch default calendar for Microsoft sign-in",
+              getAuthErrorDiagnostic(error)
+            );
           }
 
           // Update profile photo for Microsoft/Azure AD sign-in
@@ -729,10 +745,7 @@ export const getOptions = ({
 
         const allProfiles = await ProfileRepository.findAllProfilesForUserIncludingMovedUser(existingUser);
         const { upId } = determineProfile({ profiles: allProfiles, token });
-        log.debug(
-          "callbacks:jwt:accountType:oauth:existingUser",
-          safeStringify({ userId: existingUser.id, upId })
-        );
+        log.debug("callbacks:jwt:accountType:oauth:existingUser");
         return {
           ...token,
           upId,
@@ -754,14 +767,14 @@ export const getOptions = ({
         return await autoMergeIdentities();
       }
 
-      log.warn(
-        "callbacks:jwt - unknown account type",
-        safeStringify({ accountType: account.type, accountProvider: account.provider })
-      );
+      log.warn("callbacks:jwt - unknown account type", {
+        accountType: account.type,
+        accountProvider: account.provider,
+      });
       return token;
     },
     async session({ session, token, user }) {
-      log.debug("callbacks:session - Session callback called", safeStringify({ session, token, user }));
+      log.debug("callbacks:session - Session callback called");
       const hasValidLicense = false;
       const profileId = token.profileId;
       const calendsoSession: Session = {
@@ -798,7 +811,7 @@ export const getOptions = ({
         account,
       } = params;
 
-      log.debug("callbacks:signin", safeStringify(params));
+      log.debug("callbacks:signin");
 
       if (account?.provider === "email") {
         return true;
@@ -826,7 +839,6 @@ export const getOptions = ({
 
       if (!user.name) {
         log.warn("callbacks:signIn - user name is missing", {
-          emailDomain: user.email.split("@")[1],
           provider: account?.provider,
         });
         return false;
@@ -856,15 +868,12 @@ export const getOptions = ({
           isEmailVerified || (idP === IdentityProvider.AZUREAD && isAzureEmailDomainVerified);
 
         if (idP === IdentityProvider.AZUREAD && !isAzureEmailDomainVerified) {
-          log.error(
-            "Azure AD email domain not verified (xms_edov claim)",
-            safeStringify({ emailDomain: user.email?.split("@")[1], xmsEdov })
-          );
+          log.error("Azure AD email domain not verified (xms_edov claim)");
           return "/auth/error?error=unverified-email";
         }
 
         if (!isEmailVerified && idP !== IdentityProvider.AZUREAD) {
-          log.error("Attention: SAML/Google User email is not verified in the IdP", safeStringify({ user }));
+          log.error("Attention: SAML/Google User email is not verified in the IdP");
           return "/auth/error?error=unverified-email";
         }
 
@@ -938,7 +947,10 @@ export const getOptions = ({
               }
             } catch (error) {
               if (error instanceof Error) {
-                log.error("Error while linking account of already existing user", safeStringify(error));
+                log.error(
+                  "Error while linking account of already existing user",
+                  getAuthErrorDiagnostic(error)
+                );
               }
             }
             if (existingUser.twoFactorEnabled && existingUser.identityProvider === idP) {
@@ -1054,7 +1066,7 @@ export const getOptions = ({
               return true;
             }
           } else if (existingUserWithEmail.identityProvider === IdentityProvider.CAL) {
-            log.error(`Userid ${user.id} already exists with CAL identity provider`);
+            log.error("User already exists with CAL identity provider");
             return `/auth/error?error=wrong-provider&provider=${existingUserWithEmail.identityProvider}`;
           } else if (
             existingUserWithEmail.identityProvider === IdentityProvider.GOOGLE &&
@@ -1093,13 +1105,9 @@ export const getOptions = ({
               return true;
             }
           }
-          log.error(`Userid ${user.id} trying to login with the wrong provider`, {
-            userId: user.id,
-            account: {
-              providerAccountId: account?.providerAccountId,
-              type: account?.type,
-              provider: account?.provider,
-            },
+          log.error("User trying to login with the wrong provider", {
+            accountType: account?.type,
+            provider: account?.provider,
           });
           return `/auth/error?error=wrong-provider&provider=${existingUserWithEmail.identityProvider}`;
         }
@@ -1148,7 +1156,7 @@ export const getOptions = ({
             return true;
           }
         } catch (err) {
-          log.error("Error creating a new user", err);
+          log.error("Error creating a new user", getAuthErrorDiagnostic(err));
           return `/auth/error?error=user-creation-error`;
         }
       }
