@@ -1,9 +1,12 @@
+import { isIP } from "node:net";
+import process from "node:process";
+import i18nConfig from "@calcom/i18n/next-i18next.config";
 import { withBotId } from "botid/next/config";
 import { config as dotenvConfig } from "dotenv";
 import type { NextConfig } from "next";
-import type { RouteHas } from "next/dist/lib/load-custom-routes";
+import { PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER } from "next/constants";
+import type { Header, RouteHas } from "next/dist/lib/load-custom-routes";
 import { withAxiom } from "next-axiom";
-import i18nConfig from "@calcom/i18n/next-i18next.config";
 import packageJson from "./package.json";
 import {
   nextJsOrgRewriteConfig,
@@ -209,6 +212,57 @@ const orgDomainMatcherConfig: {
     source: orgUserTypeEmbedRoutePath,
   },
 };
+
+function getHstsHeaders(phase: string): Header[] {
+  const origin = process.env.HSTS_PUBLIC_ORIGIN;
+  if (
+    !origin ||
+    ![PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER].includes(phase) ||
+    process.env.NODE_ENV !== "production" ||
+    (process.env.CALCOM_ENV || process.env.NODE_ENV) !== "production"
+  )
+    return [];
+
+  const invalidOrigin = () =>
+    new Error(
+      "HSTS_PUBLIC_ORIGIN must be a public HTTPS origin without credentials, a path, a query, or a fragment"
+    );
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    throw invalidOrigin();
+  }
+  const hostname = url.hostname;
+  const validDnsLabels = hostname
+    .split(".")
+    .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+  if (
+    origin !== origin.trim() ||
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash ||
+    !hostname.includes(".") ||
+    hostname.length > 253 ||
+    !validDnsLabels ||
+    isIP(hostname.replace(/^\[|\]$/g, "")) ||
+    /(^|\.)(localhost|local|localdomain|lan|home|test|invalid|internal|example)$/.test(hostname) ||
+    hostname.endsWith(".home.arpa")
+  )
+    throw invalidOrigin();
+
+  // A separate build input survives the app URL placeholder; HSTS stays bound to this HTTPS host.
+  return [
+    {
+      source: "/:path*",
+      has: [{ type: "host", value: hostname.replace(/\./g, "\\.") }],
+      headers: [{ key: "Strict-Transport-Security", value: "max-age=604800" }],
+    },
+  ];
+}
 
 const nextConfig = (phase: string): NextConfig => {
   if (isOrganizationsEnabled) {
@@ -496,7 +550,9 @@ const nextConfig = (phase: string): NextConfig => {
               },
             ]
           : []),
-      ].filter(isNotNull);
+      ]
+        .filter(isNotNull)
+        .concat(getHstsHeaders(phase));
     },
     async redirects() {
       const redirects = [

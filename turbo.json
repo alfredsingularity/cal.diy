@@ -351,6 +351,7 @@
       "dependsOn": ["^build", "copy-app-store-static"],
       "outputs": [".next/**"],
       "env": [
+        "HSTS_PUBLIC_ORIGIN",
         "NEXT_PUBLIC_AVAILABILITY_SCHEDULE_INTERVAL",
         "NEXT_PUBLIC_BOOKER_NUMBER_OF_DAYS_TO_LOAD",
         "NEXT_PUBLIC_CAL_AI_PHONE_NUMBER_MONTHLY_PRICE",
