@@ -41,6 +41,7 @@ export const BaseScheduledEmail = (
   }
 
   const subject = t(props.subject || "confirmed_event_type_subject", {
+    title: props.calEvent.title,
     eventType: props.calEvent.type,
     name: props.calEvent.team?.name || props.calEvent.organizer.name,
     date: `${getRecipientStart("h:mma")} - ${getRecipientEnd("h:mma")}, ${t(
@@ -65,7 +66,7 @@ export const BaseScheduledEmail = (
     <BaseEmailHtml
       hideLogo={Boolean(props.calEvent.platformClientId) || Boolean(props.calEvent.hideBranding)}
       headerType={props.headerType || "checkCircle"}
-      subject={props.subject || subject}
+      subject={subject}
       title={t(
         props.title
           ? props.title
