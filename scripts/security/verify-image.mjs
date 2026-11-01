@@ -19,8 +19,44 @@ async function readJson(file) {
   }
 }
 
+async function verifyHsts(root) {
+  const args = process.argv.slice(2);
+  if (args.length === 0) return undefined;
+  const prefix = "--expected-hsts-origin=";
+  check(args.length === 1 && args[0].startsWith(prefix), "Unsupported image verification arguments");
+  let origin;
+  try {
+    origin = new URL(args[0].slice(prefix.length));
+  } catch {
+    throw new VerificationError("Invalid expected HSTS origin");
+  }
+  check(origin.protocol === "https:" && origin.origin === args[0].slice(prefix.length) &&
+    origin.hostname.includes(".") && !origin.port && !origin.username && !origin.password,
+  "Invalid expected HSTS origin");
+  const manifest = await readJson(path.join(root, "apps/web/.next/routes-manifest.json"));
+  check(isRecord(manifest) && Array.isArray(manifest.headers), "Missing routing headers manifest");
+  check(manifest.onMatchHeaders === undefined || Array.isArray(manifest.onMatchHeaders),
+    "Invalid matched-route headers manifest");
+  const hasHsts = rule => isRecord(rule) && Array.isArray(rule.headers) &&
+    rule.headers.some(header => isRecord(header) && typeof header.key === "string" &&
+      header.key.toLowerCase() === "strict-transport-security");
+  check(!(manifest.onMatchHeaders || []).some(hasHsts), "Matched-route HSTS can override the reviewed policy");
+  const rules = manifest.headers.filter(hasHsts);
+  check(rules.length === 1, "Expected exactly one HSTS header rule");
+  const rule = rules[0];
+  const expectedHost = origin.hostname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  check(rule.source === "/:path*" && Array.isArray(rule.has) && rule.has.length === 1 &&
+    rule.has[0]?.type === "host" && rule.has[0]?.value === expectedHost &&
+    (rule.missing === undefined || (Array.isArray(rule.missing) && rule.missing.length === 0)),
+  "HSTS rule does not cover exactly the intended public host");
+  check(rule.headers.length === 1 && rule.headers[0].key === "Strict-Transport-Security" &&
+    rule.headers[0].value === "max-age=604800", "HSTS policy differs from the reviewed one-week policy");
+  return { origin: origin.origin, policy: "max-age=604800", manifestVerified: true };
+}
+
 async function verify() {
   const root = process.cwd();
+  const hsts = await verifyHsts(root);
   const web = createRequire(path.join(root, "apps/web/package.json"));
   const lib = createRequire(path.join(root, "packages/lib/package.json"));
   const source = await readJson(path.join(root, "apps/web/package.json"));
@@ -83,7 +119,7 @@ async function verify() {
   await inspect(root);
   check(manifests > 0 && references.size > 0, "Missing action manifests cannot prove getter removal");
   check(packageCopies.some(copy => copy.name === "next") && packageCopies.some(copy => copy.name === "sharp"), "Missing dependency inventory");
-  console.log(JSON.stringify({ passed: true, node: process.versions.node, next: nextVersion, nextAuth: nextAuthVersion, architecture: process.arch, sharp: "0.35.5", librsvg: "2.63.2", manifests, uniqueActionReferences: references.size, publicActionExports: [...actionExports].sort(), packageCopies }));
+  console.log(JSON.stringify({ passed: true, node: process.versions.node, next: nextVersion, nextAuth: nextAuthVersion, architecture: process.arch, sharp: "0.35.5", librsvg: "2.63.2", manifests, uniqueActionReferences: references.size, publicActionExports: [...actionExports].sort(), packageCopies, ...(hsts ? { hsts } : {}) }));
 }
 
 try {
