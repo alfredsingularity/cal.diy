@@ -1,11 +1,22 @@
+import process from "node:process";
+import { isENVDev } from "@calcom/lib/env";
 import type SendmailTransport from "nodemailer/lib/sendmail-transport";
 import type SMTPConnection from "nodemailer/lib/smtp-connection";
-
-import { isENVDev } from "@calcom/lib/env";
-
 import { getAdditionalEmailHeaders } from "./getAdditionalEmailHeaders";
+import { MailgunTransport } from "./mailgunTransport";
 
-function detectTransport(): SendmailTransport.Options | SMTPConnection.Options | string {
+function detectTransport(): MailgunTransport | SendmailTransport.Options | SMTPConnection.Options | string {
+  if (
+    [process.env.MAILGUN_DOMAIN, process.env.MAILGUN_API_KEY, process.env.MAILGUN_REGION].some(
+      (value) => value !== undefined
+    )
+  ) {
+    return new MailgunTransport({
+      domain: process.env.MAILGUN_DOMAIN,
+      apiKey: process.env.MAILGUN_API_KEY,
+      region: process.env.MAILGUN_REGION,
+    });
+  }
   if (process.env.RESEND_API_KEY) {
     const transport = {
       host: "smtp.resend.com",
@@ -54,8 +65,12 @@ function detectTransport(): SendmailTransport.Options | SMTPConnection.Options |
   };
 }
 
+const transport = detectTransport();
 export const serverConfig = {
-  transport: detectTransport(),
+  transport,
   from: process.env.EMAIL_FROM,
-  headers: getAdditionalEmailHeaders()[process.env.EMAIL_SERVER_HOST || ""] || undefined,
+  headers:
+    transport instanceof MailgunTransport
+      ? undefined
+      : getAdditionalEmailHeaders()[process.env.EMAIL_SERVER_HOST || ""] || undefined,
 };

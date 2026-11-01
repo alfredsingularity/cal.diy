@@ -1,14 +1,13 @@
-import { decodeHTML } from "entities";
-import { z } from "zod";
-
+import process from "node:process";
 import dayjs from "@calcom/dayjs";
 import { FeaturesRepository } from "@calcom/features/flags/features.repository";
+import { createEmailTransport, emailFailureDiagnostic } from "@calcom/lib/emailTransport";
 import isSmsCalEmail from "@calcom/lib/isSmsCalEmail";
 import { serverConfig } from "@calcom/lib/serverConfig";
-import { getServerErrorFromUnknown } from "@calcom/lib/server/getServerErrorFromUnknown";
 import { setTestEmail } from "@calcom/lib/testEmails";
 import { prisma } from "@calcom/prisma";
-
+import { decodeHTML } from "entities";
+import { z } from "zod";
 import { sanitizeDisplayName } from "../lib/sanitizeDisplayName";
 
 export default class BaseEmail {
@@ -54,8 +53,7 @@ export default class BaseEmail {
     const to = "to" in payload ? (payload.to as string) : "";
 
     if (isSmsCalEmail(to)) {
-      console.log(`Skipped Sending Email to faux email: ${to}`);
-      return new Promise((r) => r(`Skipped Sending Email to faux email: ${to}`));
+      return { status: "skipped" as const, reason: "SMS_ADDRESS" };
     }
 
     const sanitizedFrom = sanitizeDisplayName(from);
@@ -71,29 +69,15 @@ export default class BaseEmail {
       },
       ...(parseSubject.success && { subject: decodeHTML(parseSubject.data) }),
     };
-    const { createTransport } = await import("nodemailer");
-    await new Promise((resolve, reject) =>
-      createTransport(this.getMailerOptions().transport).sendMail(
-        payloadWithUnEscapedSubject,
-        (_err, info) => {
-          if (_err) {
-            const err = getServerErrorFromUnknown(_err);
-            this.printNodeMailerError(err);
-            reject(err);
-          } else {
-            resolve(info);
-          }
-        }
-      )
-    ).catch((e) =>
-      console.error(
-        "sendEmail",
-        `from: ${"from" in payloadWithUnEscapedSubject ? payloadWithUnEscapedSubject.from : ""}`,
-        `subject: ${"subject" in payloadWithUnEscapedSubject ? payloadWithUnEscapedSubject.subject : ""}`,
-        e
-      )
-    );
-    return new Promise((resolve) => resolve("send mail async"));
+    try {
+      await createEmailTransport(this.getMailerOptions().transport).sendMail(payloadWithUnEscapedSubject);
+      return { status: "accepted" as const };
+    } catch (error) {
+      this.printNodeMailerError(error);
+      // Booking/calendar creation may already have succeeded. Report mail failure
+      // without prompting a retry of the booking and possibly creating duplicates.
+      return { status: "failed" as const, ...emailFailureDiagnostic(error) };
+    }
   }
   protected getMailerOptions() {
     return {
@@ -102,9 +86,9 @@ export default class BaseEmail {
       headers: serverConfig.headers,
     };
   }
-  protected printNodeMailerError(error: Error): void {
+  protected printNodeMailerError(error: unknown): void {
     /** Don't clog the logs with unsent emails in E2E */
     if (process.env.NEXT_PUBLIC_IS_E2E) return;
-    console.error(`${this.name}_ERROR`, error);
+    console.error("EMAIL_DELIVERY_FAILED", emailFailureDiagnostic(error));
   }
 }
