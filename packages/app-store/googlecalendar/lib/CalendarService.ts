@@ -25,6 +25,7 @@ import { RRule } from "rrule";
 
 import { AxiosLikeResponseToFetchResponse } from "../../_utils/oauth/AxiosLikeResponseToFetchResponse";
 import { CalendarAuth } from "./CalendarAuth";
+import { getEnrichmentFailureDiagnostic } from "./getEnrichmentFailureDiagnostic";
 
 type FreeBusyArgs = { timeMin: string; timeMax: string; items: { id: string }[] };
 
@@ -296,26 +297,32 @@ class GoogleCalendarService implements Calendar {
       }
 
       if (event && event.id && event.hangoutLink) {
-        await calendar.events.patch({
-          // Update the same event but this time we know the hangout link
-          calendarId: selectedCalendar,
-          eventId: event.id || "",
-          requestBody: {
-            description: getRichDescription({
-              ...calEvent,
-              additionalInformation: { hangoutLink: event.hangoutLink },
-            }),
-            location: getLocation({
-              videoCallData: calEvent.videoCallData,
-              additionalInformation: {
-                ...calEvent.additionalInformation,
-                hangoutLink: event.hangoutLink,
-              },
-              location: calEvent.location,
-              uid: calEvent.uid,
-            }),
-          },
-        });
+        try {
+          await calendar.events.patch({
+            // Update the same event but this time we know the hangout link
+            calendarId: selectedCalendar,
+            eventId: event.id || "",
+            requestBody: {
+              description: getRichDescription({
+                ...calEvent,
+                additionalInformation: { hangoutLink: event.hangoutLink },
+              }),
+              location: getLocation({
+                videoCallData: calEvent.videoCallData,
+                additionalInformation: {
+                  ...calEvent.additionalInformation,
+                  hangoutLink: event.hangoutLink,
+                },
+                location: calEvent.location,
+                uid: calEvent.uid,
+              }),
+            },
+          });
+        } catch (error) {
+          // Creation already succeeded. Retain its reference for confirmation and
+          // cancellation even if the optional Meet-link enrichment fails.
+          this.log.warn("GOOGLE_CALENDAR_ENRICHMENT_FAILED", getEnrichmentFailureDiagnostic(error));
+        }
       }
 
       return {
