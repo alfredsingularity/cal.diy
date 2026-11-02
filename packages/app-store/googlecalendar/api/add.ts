@@ -1,18 +1,16 @@
-import { OAuth2Client } from "googleapis-common";
-import type { NextApiRequest, NextApiResponse } from "next";
-
 import { GOOGLE_CALENDAR_SCOPES, SCOPE_USERINFO_PROFILE, WEBAPP_URL_FOR_OAUTH } from "@calcom/lib/constants";
 import { HttpError } from "@calcom/lib/http-error";
 import { defaultHandler } from "@calcom/lib/server/defaultHandler";
 import { defaultResponder } from "@calcom/lib/server/defaultResponder";
-
-import { encodeOAuthState } from "../../_utils/oauth/encodeOAuthState";
+import { OAuth2Client } from "googleapis-common";
+import type { NextApiRequest, NextApiResponse } from "next";
 import { getGoogleAppKeys } from "../lib/getGoogleAppKeys";
+import { encodeGoogleOAuthState } from "./oauthState";
 
 async function getHandler(req: NextApiRequest, res: NextApiResponse) {
   const loggedInUser = req.session?.user;
 
-  if (!loggedInUser) {
+  if (!loggedInUser?.id) {
     throw new HttpError({ statusCode: 401, message: "You must be logged in to do this" });
   }
 
@@ -22,6 +20,7 @@ async function getHandler(req: NextApiRequest, res: NextApiResponse) {
     throw new HttpError({ statusCode: 400, message: "Session user must have an email" });
   }
 
+  const state = encodeGoogleOAuthState(req);
   const { client_id, client_secret } = await getGoogleAppKeys();
   const redirect_uri = `${WEBAPP_URL_FOR_OAUTH}/api/integrations/googlecalendar/callback`;
   const oAuth2Client = new OAuth2Client(client_id, client_secret, redirect_uri);
@@ -34,12 +33,14 @@ async function getHandler(req: NextApiRequest, res: NextApiResponse) {
     // setting the prompt to 'consent' will force this consent
     // every time, forcing a refresh_token to be returned.
     prompt: "consent",
-    state: encodeOAuthState(req),
+    state,
   });
 
   res.status(200).json({ url: authUrl });
 }
 
 export default defaultHandler({
-  GET: Promise.resolve({ default: defaultResponder(getHandler) }),
+  GET: Promise.resolve({
+    default: defaultResponder(getHandler, "/api/integrations/googlecalendar/add", { sensitiveRequest: true }),
+  }),
 });

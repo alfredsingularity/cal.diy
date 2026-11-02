@@ -17,16 +17,22 @@ import { calendar_v3 } from "@googleapis/calendar";
 import { OAuth2Client } from "googleapis-common";
 import type { NextApiRequest, NextApiResponse } from "next";
 import getInstalledAppPath from "../../_utils/getInstalledAppPath";
-import { decodeOAuthState } from "../../_utils/oauth/decodeOAuthState";
 import { updateProfilePhotoGoogle } from "../../_utils/oauth/updateProfilePhotoGoogle";
 import { getGoogleAppKeys } from "../lib/getGoogleAppKeys";
+import { decodeGoogleOAuthState } from "./oauthState";
 
 async function getHandler(req: NextApiRequest, res: NextApiResponse) {
-  const { code } = req.query;
-  const state = decodeOAuthState(req);
+  if (!req.session?.user?.id) {
+    throw new HttpError({ statusCode: 401, message: "You must be logged in to do this" });
+  }
+  const { code, error } = req.query;
+  const state = decodeGoogleOAuthState(req);
 
-  if (typeof code !== "string") {
-    if (state?.onErrorReturnTo || state?.returnTo) {
+  if (error !== undefined || typeof code !== "string" || !code) {
+    if (error !== undefined && typeof error !== "string") {
+      throw new HttpError({ statusCode: 400, message: "Invalid Google OAuth response" });
+    }
+    if (error || state.onErrorReturnTo || state.returnTo) {
       res.redirect(
         getSafeRedirectUrl(state.onErrorReturnTo) ??
           getSafeRedirectUrl(state?.returnTo) ??
@@ -35,10 +41,6 @@ async function getHandler(req: NextApiRequest, res: NextApiResponse) {
       return;
     }
     throw new HttpError({ statusCode: 400, message: "`code` must be a string" });
-  }
-
-  if (!req.session?.user?.id) {
-    throw new HttpError({ statusCode: 401, message: "You must be logged in to do this" });
   }
 
   const { client_id, client_secret } = await getGoogleAppKeys();
