@@ -400,7 +400,13 @@
     "@calcom/web#start": {
       "cache": false,
       "dependsOn": [],
-      "passThroughEnv": ["MAILGUN_DOMAIN", "MAILGUN_API_KEY", "MAILGUN_REGION"]
+      "passThroughEnv": [
+        "MAILGUN_DOMAIN",
+        "MAILGUN_API_KEY",
+        "MAILGUN_REGION",
+        "GOOGLE_RENEWAL_MAINTENANCE",
+        "GOOGLE_RENEWAL_OWNER_USER_ID"
+      ]
     },
     "@calcom/atoms#build-npm": {
       "outputs": ["dist/**", "globals.min.css"]
