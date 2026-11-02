@@ -10,8 +10,8 @@ import { CalendarAppDelegationCredentialError } from "@calcom/lib/CalendarAppErr
 import { ORGANIZER_EMAIL_EXEMPT_DOMAINS } from "@calcom/lib/constants";
 import { buildNonDelegationCredentials } from "@calcom/lib/delegationCredential";
 import { formatCalEvent } from "@calcom/lib/formatCalendarEvent";
+import { getCalendarErrorDiagnostic } from "@calcom/lib/getCalendarErrorDiagnostic";
 import logger from "@calcom/lib/logger";
-import { getPiiFreeCalendarEvent, getPiiFreeCredential } from "@calcom/lib/piiFreeData";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import type {
   CalendarEvent,
@@ -369,12 +369,7 @@ export const createEvent = async (
   let success = true;
   let calError: string | undefined;
 
-  log.debug(
-    "Creating calendar event",
-    safeStringify({
-      calEvent: getPiiFreeCalendarEvent(formattedEvent),
-    })
-  );
+  log.debug("Creating calendar event", { attendeeCount: formattedEvent.attendees.length });
   // Check if the disabledNotes flag is set to true
   if (formattedEvent.hideCalendarNotes) {
     formattedEvent.additionalNotes = "Notes have been hidden by the organizer"; // TODO: i18n this string?
@@ -404,11 +399,7 @@ export const createEvent = async (
           if (error?.calError) {
             calError = error.calError;
           }
-          log.error(
-            "createEvent failed",
-            safeStringify(error),
-            safeStringify({ calEvent: getPiiFreeCalendarEvent(calEvent) })
-          );
+          log.error("createEvent failed", getCalendarErrorDiagnostic(error));
           // @TODO: This code will be off till we can investigate an error with it
           //https://github.com/calcom/cal.diy/issues/3949
           // await sendBrokenIntegrationEmail(calEvent, "calendar");
@@ -416,24 +407,9 @@ export const createEvent = async (
         })
     : undefined;
   if (!creationResult) {
-    logger.error(
-      "createEvent failed",
-      safeStringify({
-        success,
-        uid,
-        creationResult,
-        originalEvent: getPiiFreeCalendarEvent(calEvent),
-        calError,
-      })
-    );
+    logger.error("createEvent failed", { success, hasCalendarAdapter: !!calendar, hasCalError: !!calError });
   }
-  log.debug(
-    "Created calendar event",
-    safeStringify({
-      calEvent: getPiiFreeCalendarEvent(calEvent),
-      creationResult,
-    })
-  );
+  log.debug("Created calendar event", { success, hasCreatedEvent: !!creationResult });
   return {
     appName: credential.appName || credential.appId || "",
     type: credential.type,
@@ -468,19 +444,12 @@ export const updateEvent = async (
   let success = false;
   let calError: string | undefined;
   let calWarnings: string[] | undefined = [];
-  log.debug(
-    "Updating calendar event",
-    safeStringify({
-      bookingRefUid,
-      calEvent: getPiiFreeCalendarEvent(calEvent),
-    })
-  );
+  log.debug("Updating calendar event", {
+    hasBookingReference: !!bookingRefUid,
+    attendeeCount: calEvent.attendees.length,
+  });
   if (bookingRefUid === "") {
-    log.error(
-      "updateEvent failed",
-      "bookingRefUid is empty",
-      safeStringify({ calEvent: getPiiFreeCalendarEvent(calEvent) })
-    );
+    log.error("updateEvent failed", { hasBookingReference: false });
   }
   const updatedResult: NewCalendarEventType | NewCalendarEventType[] | undefined =
     calendar && bookingRefUid
@@ -494,10 +463,7 @@ export const updateEvent = async (
             // @TODO: This code will be off till we can investigate an error with it
             // @see https://github.com/calcom/cal.diy/issues/3949
             // await sendBrokenIntegrationEmail(calEvent, "calendar");
-            log.error(
-              "updateEvent failed",
-              safeStringify({ e, calEvent: getPiiFreeCalendarEvent(calEvent) })
-            );
+            log.error("updateEvent failed", getCalendarErrorDiagnostic(e));
             if (e?.calError) {
               calError = e.calError;
             }
@@ -506,16 +472,11 @@ export const updateEvent = async (
       : undefined;
 
   if (!updatedResult) {
-    logger.error(
-      "updateEvent failed",
-      safeStringify({
-        success,
-        bookingRefUid,
-        credential: getPiiFreeCredential(credential),
-        originalEvent: getPiiFreeCalendarEvent(calEvent),
-        calError,
-      })
-    );
+    logger.error("updateEvent failed", {
+      success,
+      hasBookingReference: !!bookingRefUid,
+      hasCalError: !!calError,
+    });
   }
 
   if (Array.isArray(updatedResult)) {
@@ -550,31 +511,19 @@ export const deleteEvent = async ({
   if (!bookingRefUid) {
     log.error(
       "deleteEvent failed - bookingRefUid is empty, skipping calendar deletion to prevent malformed API request",
-      safeStringify({
-        credential: getPiiFreeCredential(credential),
-        event: getPiiFreeCalendarEvent(event),
-      })
+      { hasCredential: !!credential, hasBookingReference: false }
     );
     return Promise.resolve({});
   }
   const calendar = await getCalendar(credential, "booking");
-  log.debug(
-    "Deleting calendar event",
-    safeStringify({
-      bookingRefUid,
-      event: getPiiFreeCalendarEvent(event),
-    })
-  );
+  log.debug("Deleting calendar event", { hasBookingReference: !!bookingRefUid });
   if (calendar) {
     return calendar.deleteEvent(bookingRefUid, event, externalCalendarId);
   } else {
-    log.error(
-      "Could not do deleteEvent - No calendar adapter found",
-      safeStringify({
-        credential: getPiiFreeCredential(credential),
-        event,
-      })
-    );
+    log.error("Could not do deleteEvent - No calendar adapter found", {
+      hasCredential: !!credential,
+      hasCalendarAdapter: false,
+    });
   }
 
   return Promise.resolve({});
