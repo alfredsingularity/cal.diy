@@ -1,11 +1,11 @@
-import { oauth2_v2 } from "@googleapis/oauth2";
-import type { OAuth2Client } from "googleapis-common";
-
 import { UserRepository } from "@calcom/features/users/repositories/UserRepository";
+import { getCalendarErrorDiagnostic } from "@calcom/lib/getCalendarErrorDiagnostic";
 import logger from "@calcom/lib/logger";
 import { uploadAvatar } from "@calcom/lib/server/avatar";
 import { resizeBase64Image } from "@calcom/lib/server/resizeBase64Image";
 import prisma from "@calcom/prisma";
+import { oauth2_v2 } from "@googleapis/oauth2";
+import type { OAuth2Client } from "googleapis-common";
 
 export async function updateProfilePhotoGoogle(oAuth2Client: OAuth2Client, userId: number) {
   try {
@@ -34,6 +34,6 @@ export async function updateProfilePhotoGoogle(oAuth2Client: OAuth2Client, userI
     const userRepo = new UserRepository(prisma);
     await userRepo.updateAvatar({ id: userId, avatarUrl });
   } catch (error) {
-    logger.error("Error updating avatarUrl from google calendar connect", error);
+    logger.error("Error updating avatarUrl from google calendar connect", getCalendarErrorDiagnostic(error));
   }
 }
