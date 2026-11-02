@@ -184,7 +184,7 @@ describe("disabled gate preserves original proxy scope", () => {
   it.each([undefined, "", "0"])("does not gate when mode is %s", async (mode) => {
     vi.stubEnv("GOOGLE_RENEWAL_MAINTENANCE", mode);
     const response = await proxy(request("/api/book/event", "POST"));
-    expect([...response.headers]).toEqual([["x-middleware-next", "1"]]);
+    expect(Array.from(response.headers.entries())).toEqual([["x-middleware-next", "1"]]);
   });
 
   it("applies legacy processing exactly where the original Next matcher applied", async () => {
