@@ -500,7 +500,7 @@ export const sendDeclinedEmailsAndSMS = async (
 
 export const sendCancelledEmailsAndSMS = async (
   calEvent: CalendarEvent,
-  eventNameObject: Pick<EventNameObjectType, "eventName">,
+  eventNameObject: Pick<EventNameObjectType, "eventName"> & { eventType: string | undefined },
   eventTypeMetadata?: EventTypeMetadata
 ) => {
   const calendarEvent = formatCalEvent(calEvent);
@@ -536,16 +536,20 @@ export const sendCancelledEmailsAndSMS = async (
             new AttendeeCancelledEmail(
               {
                 ...calendarEvent,
-                title: getEventName({
-                  ...eventNameObject,
-                  t: attendee.language.translate,
-                  attendeeName: attendee.name,
-                  host: calendarEvent.organizer.name,
-                  eventType: calendarEvent.title,
-                  eventDuration,
-                  ...(calendarEvent.responses && { bookingFields: calendarEvent.responses }),
-                  ...(calendarEvent.location && { location: calendarEvent.location }),
-                }),
+                // Stored booking titles are already composed. If the event type
+                // was deleted, retain that title instead of composing it again.
+                title: eventNameObject.eventType
+                  ? getEventName({
+                      ...eventNameObject,
+                      eventType: eventNameObject.eventType,
+                      t: attendee.language.translate,
+                      attendeeName: attendee.name,
+                      host: calendarEvent.organizer.name,
+                      eventDuration,
+                      ...(calendarEvent.responses && { bookingFields: calendarEvent.responses }),
+                      ...(calendarEvent.location && { location: calendarEvent.location }),
+                    })
+                  : calendarEvent.title,
               },
               attendee
             )
