@@ -196,7 +196,7 @@ const LayoutToggle = ({
         label: (
           <>
             <CalendarIcon className="h-4 w-4" />
-            <span className="sr-only">${t("switch_monthly")}</span>
+            <span className="sr-only">{t("switch_monthly")}</span>
           </>
         ),
         tooltip: t("switch_monthly"),
@@ -206,7 +206,7 @@ const LayoutToggle = ({
         label: (
           <>
             <Grid3x3Icon className="h-4 w-4" />
-            <span className="sr-only">${t("switch_weekly")}</span>
+            <span className="sr-only">{t("switch_weekly")}</span>
           </>
         ),
         tooltip: t("switch_weekly"),
@@ -216,7 +216,7 @@ const LayoutToggle = ({
         label: (
           <>
             <Columns3Icon className="h-4 w-4" />
-            <span className="sr-only">${t("switch_columnview")}</span>
+            <span className="sr-only">{t("switch_columnview")}</span>
           </>
         ),
         tooltip: t("switch_columnview"),
