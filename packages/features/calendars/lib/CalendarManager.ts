@@ -199,7 +199,7 @@ export const getConnectedCalendars = async (
           errorMessage = error.message;
         }
 
-        log.error("getConnectedCalendars failed", error, safeStringify({ credentialId: item.credential.id }));
+        log.error("getConnectedCalendars failed", getCalendarErrorDiagnostic(error));
 
         return {
           integration: cleanIntegrationKeys(item.integration),
@@ -349,8 +349,8 @@ export const getBusyCalendarTimes = async (
     }
   } catch (e) {
     log.warn(`Error getting calendar availability`, {
-      selectedCalendarIds: selectedCalendars.map((calendar) => calendar.externalId),
-      error: safeStringify(e),
+      selectedCalendarCount: selectedCalendars.length,
+      ...getCalendarErrorDiagnostic(e),
     });
     return { success: false, data: [{ start: startDate, end: endDate, source: "error-placeholder" }] };
   }
