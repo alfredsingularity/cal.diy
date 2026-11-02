@@ -10,12 +10,12 @@
  *
  * For a recommended usage example, see Zoom VideoApiAdapter.ts
  */
-import type { z } from "zod";
 
 import { CREDENTIAL_SYNC_ENDPOINT } from "@calcom/lib/constants";
+import { getCalendarErrorDiagnostic } from "@calcom/lib/getCalendarErrorDiagnostic";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
-
+import type { z } from "zod";
 import type { AxiosLikeResponseToFetchResponse } from "./AxiosLikeResponseToFetchResponse";
 import type { OAuth2TokenResponseInDbWhenExistsSchema, OAuth2UniversalSchema } from "./universalSchema";
 import { OAuth2UniversalSchemaWithCalcomBackwardCompatibility } from "./universalSchema";
@@ -337,7 +337,7 @@ export class OAuthManager {
         "Content-Type": "application/json",
         ...options?.headers,
       };
-      myLog.debug("Sending request using fetch", safeStringify({ customFetchOrUrlAndOptions, headers }));
+      myLog.debug("Sending request using fetch");
       // We don't catch fetch error here because such an error would be temporary and we shouldn't take any action on it.
       response = await fetch(url, {
         method: "GET",
@@ -346,14 +346,7 @@ export class OAuthManager {
       });
     }
 
-    myLog.debug(
-      "Response from request",
-      safeStringify({
-        text: await response.clone().text(),
-        status: response.status,
-        statusText: response.statusText,
-      })
-    );
+    myLog.debug("Response from request", { status: response.status, ok: response.ok });
 
     const { tokenStatus, json } = await this.getAndValidateOAuth2Response({
       response,
@@ -393,7 +386,7 @@ export class OAuthManager {
    */
   public async requestRaw({ url, options }: { url: string; options: RequestInit }) {
     const myLog = log.getSubLogger({ prefix: ["requestRaw"] });
-    myLog.debug("Sending request using fetch", safeStringify({ url, options }));
+    myLog.debug("Sending request using fetch");
     if (this.autoCheckTokenExpiryOnRequest) {
       await this.getTokenObjectOrFetch();
     }
@@ -411,14 +404,7 @@ export class OAuthManager {
       ...options,
       headers: headers,
     });
-    myLog.debug(
-      "Response from request",
-      safeStringify({
-        text: await response.clone().text(),
-        status: response.status,
-        statusText: response.statusText,
-      })
-    );
+    myLog.debug("Response from request", { status: response.status, ok: response.ok });
     if (this.isResponseNotOkay(response)) {
       await this.onInconclusiveResponse();
     }
@@ -485,7 +471,7 @@ export class OAuthManager {
         safeStringify({
           appSlug: this.appSlug,
           resourceOwner: this.resourceOwner,
-          endpoint: CREDENTIAL_SYNC_ENDPOINT,
+          hasSyncEndpoint: !!CREDENTIAL_SYNC_ENDPOINT,
         })
       );
 
@@ -502,7 +488,7 @@ export class OAuthManager {
           }),
         });
       } catch (e) {
-        myLog.error("Could not refresh the token.", safeStringify(e));
+        myLog.error("Could not refresh the token.", getCalendarErrorDiagnostic(e));
         throw new Error(
           `Could not refresh the token due to connection issue with the endpoint: ${CREDENTIAL_SYNC_ENDPOINT}`
         );
@@ -531,7 +517,6 @@ export class OAuthManager {
       safeStringify({
         ok: clonedResponse.ok,
         status: clonedResponse.status,
-        statusText: clonedResponse.statusText,
       })
     );
 
@@ -550,10 +535,7 @@ export class OAuthManager {
     }
     const parsedToken = OAuth2UniversalSchemaWithCalcomBackwardCompatibility.safeParse(json);
     if (!parsedToken.success) {
-      myLog.error(
-        "Token parsing error:",
-        safeStringify({ issues: parsedToken.error.issues, oauth2response: json, tokenStatus })
-      );
+      myLog.error("Token parsing error:", { issueCount: parsedToken.error.issues.length, tokenStatus });
       throw new Error("Invalid token response");
     }
     return parsedToken.data;
@@ -623,7 +605,7 @@ function ensureValidResourceOwner(
  */
 function handleFetchError(e: unknown) {
   const myLog = log.getSubLogger({ prefix: ["handleFetchError"] });
-  myLog.debug("Error", safeStringify(e));
+  myLog.debug("OAuth request failed", getCalendarErrorDiagnostic(e));
   if (e instanceof Error) {
     return new Response(JSON.stringify({ myFetchError: e.message }), { status: 500 });
   }
