@@ -5,6 +5,7 @@ import { getDestinationCalendarRepository } from "@calcom/features/di/containers
 import { SelectedCalendarRepository } from "@calcom/features/selectedCalendar/repositories/SelectedCalendarRepository";
 import { getLocation, getRichDescription } from "@calcom/lib/CalEventParser";
 import { ORGANIZER_EMAIL_EXEMPT_DOMAINS } from "@calcom/lib/constants";
+import { getCalendarErrorDiagnostic } from "@calcom/lib/getCalendarErrorDiagnostic";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import type { Prisma } from "@calcom/prisma/client";
@@ -20,7 +21,6 @@ import type {
 } from "@calcom/types/Calendar";
 import type { CredentialForCalendarServiceWithEmail } from "@calcom/types/Credential";
 import type { calendar_v3 } from "@googleapis/calendar";
-import type { GaxiosResponse } from "googleapis-common";
 import { RRule } from "rrule";
 
 import { AxiosLikeResponseToFetchResponse } from "../../_utils/oauth/AxiosLikeResponseToFetchResponse";
@@ -70,10 +70,6 @@ interface GoogleCalError extends Error {
   code?: number;
 }
 
-const isGaxiosResponse = (error: unknown): error is GaxiosResponse<calendar_v3.Schema$Event> =>
-  // biome-ignore lint/suspicious/noPrototypeBuiltins: Object.hasOwn not available in all build targets
-  typeof error === "object" && !!error && Object.prototype.hasOwnProperty.call(error, "config");
-
 class GoogleCalendarService implements Calendar {
   private integrationName = "";
   private auth: CalendarAuth;
@@ -92,7 +88,7 @@ class GoogleCalendarService implements Calendar {
       const destinationCalendarRepository = getDestinationCalendarRepository();
       return await destinationCalendarRepository.getCustomReminderByCredentialId(credentialId);
     } catch (error) {
-      this.log.warn("Failed to fetch custom calendar reminder", safeStringify(error));
+      this.log.warn("Failed to fetch custom calendar reminder", getCalendarErrorDiagnostic(error));
       return null;
     }
   }
@@ -339,14 +335,9 @@ class GoogleCalendarService implements Calendar {
         iCalUID: event?.iCalUID,
       };
     } catch (error) {
-      if (isGaxiosResponse(error)) {
-        // Prevent clogging up the logs with the body of the request
-        // Plus, we already have this data in error.data.summary
-        delete error.config.body;
-      }
       this.log.error(
-        "There was an error creating event in google calendar: ",
-        safeStringify({ error, selectedCalendar, credentialId })
+        "There was an error creating event in google calendar",
+        getCalendarErrorDiagnostic(error)
       );
       throw error;
     }
@@ -460,8 +451,8 @@ class GoogleCalendarService implements Calendar {
       return evt?.data;
     } catch (error) {
       this.log.error(
-        "There was an error updating event in google calendar: ",
-        safeStringify({ error, event, uid })
+        "There was an error updating event in google calendar",
+        getCalendarErrorDiagnostic(error)
       );
       throw error;
     }
@@ -482,8 +473,8 @@ class GoogleCalendarService implements Calendar {
       return event?.data;
     } catch (error) {
       this.log.error(
-        "There was an error deleting event from google calendar: ",
-        safeStringify({ error, event, externalCalendarId })
+        "There was an error deleting event from google calendar",
+        getCalendarErrorDiagnostic(error)
       );
       const err = error as GoogleCalError;
       /**
@@ -491,7 +482,7 @@ class GoogleCalendarService implements Calendar {
        *  404 is when the event is on a different calendar
        */
       if (err.code === 410) return;
-      console.error("There was an error contacting google calendar service: ", err);
+      console.error("There was an error contacting google calendar service", getCalendarErrorDiagnostic(err));
       if (err.code === 404) return;
       throw err;
     }

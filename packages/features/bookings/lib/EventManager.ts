@@ -16,13 +16,9 @@ import { FeaturesRepository } from "@calcom/features/flags/features.repository";
 import { getUid } from "@calcom/lib/CalEventParser";
 import { symmetricDecrypt } from "@calcom/lib/crypto";
 import { isDelegationCredential } from "@calcom/lib/delegationCredential";
+import { getCalendarErrorDiagnostic } from "@calcom/lib/getCalendarErrorDiagnostic";
 import logger from "@calcom/lib/logger";
-import {
-  getPiiFreeDestinationCalendar,
-  getPiiFreeUser,
-  getPiiFreeCredential,
-  getPiiFreeCalendarEvent,
-} from "@calcom/lib/piiFreeData";
+import { getPiiFreeDestinationCalendar } from "@calcom/lib/piiFreeData";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import { prisma } from "@calcom/prisma";
 import type { DestinationCalendar, BookingReference } from "@calcom/prisma/client";
@@ -141,7 +137,10 @@ export default class EventManager {
    * @param user
    */
   constructor(user: EventManagerUser, eventTypeAppMetadata?: Record<string, any>) {
-    log.silly("Initializing EventManager", safeStringify({ user: getPiiFreeUser(user) }));
+    log.silly("Initializing EventManager", {
+      credentialCount: user.credentials.length,
+      hasDestinationCalendar: !!user.destinationCalendar,
+    });
     const appCredentials = getApps(user.credentials, true).flatMap((app) =>
       app.credentials.map((creds) => ({ ...creds, appName: app.name }))
     );
@@ -471,7 +470,11 @@ export default class EventManager {
       if (!uid) {
         log.error(
           "updateLocation: No uid for booking reference. The corresponding record in third party if created is orphan now",
-          safeStringify({ result })
+          {
+            success: result.success,
+            hasUpdatedEvent: !!result.updatedEvent,
+            hasCreatedEvent: !!result.createdEvent,
+          }
         );
       }
 
@@ -501,10 +504,10 @@ export default class EventManager {
     event: CalendarEvent;
     isBookingInRecurringSeries?: boolean;
   }) {
-    log.debug(
-      "deleteCalendarEventForBookingReference",
-      safeStringify({ bookingCalendarReference: reference, event: getPiiFreeCalendarEvent(event) })
-    );
+    log.debug("deleteCalendarEventForBookingReference", {
+      hasBookingReference: !!reference.uid,
+      attendeeCount: event.attendees.length,
+    });
 
     const {
       // uid: bookingRefUid,
@@ -535,7 +538,7 @@ export default class EventManager {
   }
 
   private async deleteVideoEventForBookingReference({ reference }: { reference: PartialReference }) {
-    log.debug("deleteVideoEventForBookingReference", safeStringify({ bookingVideoReference: reference }));
+    log.debug("deleteVideoEventForBookingReference", { hasBookingReference: !!reference.uid });
     const { uid: bookingRefUid, credentialId } = reference;
 
     const videoCredential = await this.getVideoCredential(credentialId, reference.type);
@@ -831,7 +834,10 @@ export default class EventManager {
       }
     }
 
-    log.debug("deleteEventsAndMeetings", safeStringify({ calendarReferences, videoReferences }));
+    log.debug("deleteEventsAndMeetings", {
+      calendarReferenceCount: calendarReferences.length,
+      videoReferenceCount: videoReferences.length,
+    });
 
     // Using allSettled to ensure that if one of the promises rejects, the others will still be executed.
     // Because we are just cleaning up the events and meetings, we don't want to throw an error if one of them fails.
@@ -840,7 +846,7 @@ export default class EventManager {
         // Make it a soft error because in case a PENDING booking is rescheduled there would be no calendar events or video meetings.
         log.warn(
           "Error deleting calendar event or video meeting for booking",
-          safeStringify({ error: result.reason })
+          getCalendarErrorDiagnostic(result.reason)
         );
       }
     });
@@ -882,7 +888,10 @@ export default class EventManager {
           // It is completely normal to fallback for delegation credential as in that case by default no destination calendar would be set.
         }
         const createdEvent = await createEvent(credential, event);
-        log.silly("Created Calendar event using credential", safeStringify({ credential, createdEvent }));
+        log.silly("Created Calendar event using credential", {
+          success: createdEvent?.success === true,
+          hasCreatedEvent: !!createdEvent?.createdEvent,
+        });
         if (createdEvent) {
           createdEvents.push(createdEvent);
         }
@@ -911,7 +920,10 @@ export default class EventManager {
       );
       for (const destination of destinationCalendars) {
         if (eventCreated) break;
-        log.silly("Creating Calendar event", JSON.stringify({ destination }));
+        log.silly("Creating Calendar event", {
+          hasCredentialId: !!destination.credentialId,
+          hasDelegationCredentialId: !!destination.delegationCredentialId,
+        });
         if (destination.credentialId || destination.delegationCredentialId) {
           let credential = getCredential({
             id: {
@@ -994,10 +1006,7 @@ export default class EventManager {
           } else {
             log.warn(
               "No credentialId found for destination calendar, falling back to first found calendar of same type as destination calendar",
-              safeStringify({
-                destination: getPiiFreeDestinationCalendar(destination),
-                firstConnectedCalendar: getPiiFreeCredential(firstCalendarCredential),
-              })
+              { hasDestinationCalendar: true, hasConnectedCalendar: !!firstCalendarCredential }
             );
             createdEvents.push(await createEvent(firstCalendarCredential, event));
             eventCreated = true;
@@ -1005,12 +1014,9 @@ export default class EventManager {
         }
       }
     } else {
-      log.warn(
-        "No destination Calendar found, falling back to first connected calendar",
-        safeStringify({
-          calendarCredentials: this.calendarCredentials,
-        })
-      );
+      log.warn("No destination Calendar found, falling back to first connected calendar", {
+        calendarCredentialCount: this.calendarCredentials.length,
+      });
       await fallbackToFirstCalendarInTheList();
     }
 
@@ -1104,7 +1110,11 @@ export default class EventManager {
   ): Promise<Array<EventResult<NewCalendarEventType>>> {
     let calendarReference: PartialReference[] | undefined = undefined,
       credential;
-    log.silly("updateAllCalendarEvents", JSON.stringify({ event, booking, newBookingId }));
+    log.silly("updateAllCalendarEvents", {
+      attendeeCount: event.attendees.length,
+      referenceCount: booking.references.length,
+      hasNewBooking: !!newBookingId,
+    });
     try {
       // If a newBookingId is given, update that calendar event
       let newBooking;
@@ -1167,7 +1177,7 @@ export default class EventManager {
             (credential) => credential.type === reference?.type
           );
           for (const credential of credentials) {
-            log.silly("updateAllCalendarEvents-credential", JSON.stringify({ credentials }));
+            log.silly("updateAllCalendarEvents-credential", { credentialCount: credentials.length });
             result.push(updateEvent(credential, event, bookingRefUid, calendarExternalId));
           }
         }
