@@ -6,8 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // We'll test the wrapped proxy as it would be used in production
-import proxy from "./proxy";
-import { config } from "./proxy";
+import proxy, { config } from "./proxy";
 
 // Mock dependencies at module level
 vi.mock("@vercel/edge-config", () => ({
@@ -149,12 +148,14 @@ const callProxy = async (req: NextRequest): Promise<Response> => {
 describe("Middleware Integration Tests", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("GOOGLE_RENEWAL_MAINTENANCE", undefined);
     // Set test environment
     vi.stubEnv("NEXT_PUBLIC_WEBAPP_URL", WEBAPP_URL);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   describe("Static File Handling", () => {
@@ -172,8 +173,8 @@ describe("Middleware Integration Tests", () => {
     });
   });
 
-  describe("Maintenance Mode", () => {
-    it("should redirect to maintenance when enabled", async () => {
+  describe("Unused legacy edge flag", () => {
+    it("does not implement maintenance through the old edge flag", async () => {
       (edgeConfigGet as Mock).mockImplementation(
         createEdgeConfigMock({
           isInMaintenanceMode: true,
@@ -189,7 +190,7 @@ describe("Middleware Integration Tests", () => {
       expectStatus(res, 200);
     });
 
-    it("should not affect API routes in maintenance mode", async () => {
+    it("does not gate APIs through the old edge flag", async () => {
       (edgeConfigGet as Mock).mockImplementation(
         createEdgeConfigMock({
           isInMaintenanceMode: true,
@@ -358,7 +359,7 @@ describe("Middleware Integration Tests", () => {
       const spy = vi.spyOn(NextResponse, "next");
 
       const req = createTestRequest({
-        url: `${WEBAPP_URL}/team/test`,
+        url: `${WEBAPP_URL}/availability`,
         // Next.js will translate request overrides into x-middleware-request-* headers internally
         headers: {
           "cf-region": "São Paulo", // contains non-ASCII "ã"
@@ -384,7 +385,7 @@ describe("Middleware Integration Tests", () => {
       const spy = vi.spyOn(NextResponse, "next");
 
       const req = createTestRequest({
-        url: `${WEBAPP_URL}/team/test`,
+        url: `${WEBAPP_URL}/availability`,
         headers: {
           "cf-region": "SÃ£o Paulo", // mojibake for "São Paulo"; includes non-ASCII bytes
         },
@@ -442,37 +443,7 @@ describe("Middleware Integration Tests", () => {
 });
 
 describe("Middleware Matcher Configuration", () => {
-  const matcher: string[] = config.matcher;
-
-  it("should include all core middleware routes", () => {
-    expect(matcher).toContain("/auth/login");
-    expect(matcher).toContain("/auth/logout");
-    expect(matcher).toContain("/api/auth/signup");
-    expect(matcher).toContain("/apps/installed");
-    expect(matcher).toContain("/availability");
-    expect(matcher).toContain("/login");
-    expect(matcher).toContain("/:path*/embed");
-  });
-
-  it("should have no duplicate entries", () => {
-    const uniqueEntries = new Set(matcher);
-    expect(uniqueEntries.size).toBe(matcher.length);
-  });
-
-  it("should not contain any /api/ routes except /api/auth/signup", () => {
-    const apiRoutes = matcher.filter((entry) => entry.startsWith("/api/") && entry !== "/api/auth/signup");
-    expect(apiRoutes).toEqual([]);
-  });
-
-  it("should only contain the expected reduced route set", () => {
-    expect(matcher).toEqual([
-      "/auth/login",
-      "/login",
-      "/apps/installed",
-      "/auth/logout",
-      "/:path*/embed",
-      "/availability",
-      "/api/auth/signup",
-    ]);
+  it("matches all routes so maintenance cannot miss APIs or public reads", () => {
+    expect(config.matcher).toEqual(["/:path*"]);
   });
 });

@@ -3,6 +3,7 @@ import { getCspHeader, getCspNonce } from "@lib/csp";
 import { get } from "@vercel/edge-config";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { isLegacyProxyPath, renewalMaintenanceResponse } from "./renewal-maintenance";
 
 const safeGet = async <T = any>(key: string): Promise<T | undefined> => {
   try {
@@ -66,6 +67,10 @@ const shouldEnforceCsp = (url: URL) => {
 };
 
 const proxy = async (req: NextRequest): Promise<NextResponse<unknown>> => {
+  const maintenanceResponse = await renewalMaintenanceResponse(req);
+  if (maintenanceResponse) return maintenanceResponse;
+  if (!isLegacyProxyPath(req.nextUrl.pathname)) return NextResponse.next();
+
   const url = req.nextUrl;
   const reqWithEnrichedHeaders = enrichRequestWithHeaders({ req });
   const requestHeaders = new Headers(reqWithEnrichedHeaders.headers);
@@ -163,7 +168,7 @@ function enrichRequestWithHeaders({ req }: { req: NextRequest }) {
 }
 
 export const config = {
-  matcher: ["/auth/login", "/login", "/apps/installed", "/auth/logout", "/:path*/embed", "/availability", "/api/auth/signup"],
+  matcher: ["/:path*"],
 };
 
 export default proxy;
