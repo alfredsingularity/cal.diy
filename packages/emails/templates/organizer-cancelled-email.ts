@@ -1,10 +1,10 @@
 import { EMAIL_FROM_NAME } from "@calcom/lib/constants";
 import type { CalendarEvent, Person } from "@calcom/types/Calendar";
-
+import { formatCancellationDate } from "../lib/formatCancellationDate";
 import generateIcsFile, { GenerateIcsRole } from "../lib/generateIcsFile";
 import renderEmail from "../src/renderEmail";
-import OrganizerScheduledEmail from "./organizer-scheduled-email";
 import type { Reassigned } from "./organizer-scheduled-email";
+import OrganizerScheduledEmail from "./organizer-scheduled-email";
 
 export default class OrganizerCancelledEmail extends OrganizerScheduledEmail {
   protected async getNodeMailerPayload(): Promise<Record<string, unknown>> {
@@ -21,7 +21,7 @@ export default class OrganizerCancelledEmail extends OrganizerScheduledEmail {
       to: toAddresses.join(","),
       subject: `${this.t(subject, {
         title: this.calEvent.title,
-        date: this.getFormattedDate(),
+        date: formatCancellationDate(this.calEvent, this.calEvent.organizer),
       })}`,
       html: await this.getHtml(this.calEvent, this.calEvent.organizer, this.reassigned),
       text: this.getTextBody("event_request_cancelled"),

@@ -15,6 +15,7 @@ import { deleteWebhookScheduledTriggers } from "@calcom/features/webhooks/lib/sc
 import { buildNonDelegationCredential } from "@calcom/lib/delegationCredential";
 import { isPrismaObjOrUndefined } from "@calcom/lib/isPrismaObj";
 import { parseRecurringEvent } from "@calcom/lib/isRecurringEvent";
+import { getTimeFormatStringFromUserTimeFormat } from "@calcom/lib/timeFormat";
 import { getTranslation } from "@calcom/i18n/server";
 import { bookingMinimalSelect, prisma } from "@calcom/prisma";
 import type { Prisma } from "@calcom/prisma/client";
@@ -239,6 +240,7 @@ const handleDeleteCredential = async ({
                   credentials: true,
                   email: true,
                   timeZone: true,
+                  timeFormat: true,
                   name: true,
                   destinationCalendar: true,
                   locale: true,
@@ -354,6 +356,7 @@ const handleDeleteCredential = async ({
                   email: booking?.userPrimaryEmail ?? (booking?.user?.email as string),
                   name: booking?.user?.name ?? "Nameless",
                   timeZone: booking?.user?.timeZone as string,
+                  timeFormat: getTimeFormatStringFromUserTimeFormat(booking?.user?.timeFormat),
                   language: { translate: tOrganizer, locale: booking?.user?.locale ?? "en" },
                 },
                 attendees: attendeesList,
@@ -380,6 +383,7 @@ const handleDeleteCredential = async ({
               },
               {
                 eventName: booking?.eventType?.eventName,
+                eventType: booking?.eventType?.title,
               },
               booking?.eventType?.metadata as EventTypeMetadata
             );

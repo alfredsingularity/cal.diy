@@ -3,6 +3,7 @@ import { formatPrice } from "@calcom/lib/currencyConversions";
 import { TimeFormat } from "@calcom/lib/timeFormat";
 import type { CalendarEvent, Person } from "@calcom/types/Calendar";
 import type { TFunction } from "i18next";
+import { formatCancellationDate, getCancellationTimeFormat } from "../../lib/formatCancellationDate";
 import {
   AppsStatus,
   BaseEmailHtml,
@@ -30,7 +31,13 @@ export const BaseScheduledEmail = (
 ) => {
   const { t, timeZone, locale, timeFormat: timeFormat_ } = props;
 
-  const timeFormat = timeFormat_ ?? TimeFormat.TWELVE_HOUR;
+  const timeFormat =
+    props.subject === "event_cancelled_subject"
+      ? getCancellationTimeFormat(props.calEvent, {
+          language: { locale, translate: t },
+          timeFormat: timeFormat_,
+        })
+      : (timeFormat_ ?? TimeFormat.TWELVE_HOUR);
 
   function getRecipientStart(format: string) {
     return dayjs(props.calEvent.startTime).tz(timeZone).format(format);
@@ -44,9 +51,16 @@ export const BaseScheduledEmail = (
     title: props.calEvent.title,
     eventType: props.calEvent.type,
     name: props.calEvent.team?.name || props.calEvent.organizer.name,
-    date: `${getRecipientStart("h:mma")} - ${getRecipientEnd("h:mma")}, ${t(
-      getRecipientStart("dddd").toLowerCase()
-    )}, ${t(getRecipientStart("MMMM").toLowerCase())} ${getRecipientStart("D, YYYY")}`,
+    date:
+      props.subject === "event_cancelled_subject"
+        ? formatCancellationDate(props.calEvent, {
+            language: { locale, translate: t },
+            timeZone,
+            timeFormat: timeFormat_,
+          })
+        : `${getRecipientStart("h:mma")} - ${getRecipientEnd("h:mma")}, ${t(
+            getRecipientStart("dddd").toLowerCase()
+          )}, ${t(getRecipientStart("MMMM").toLowerCase())} ${getRecipientStart("D, YYYY")}`,
     interpolation: { escapeValue: false },
   });
 

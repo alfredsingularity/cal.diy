@@ -1,6 +1,6 @@
 import { getReplyToHeader } from "@calcom/lib/getReplyToHeader";
 import type { CalendarEvent, Person } from "@calcom/types/Calendar";
-
+import { formatCancellationDate } from "../lib/formatCancellationDate";
 import generateIcsFile, { GenerateIcsRole } from "../lib/generateIcsFile";
 import renderEmail from "../src/renderEmail";
 import AttendeeScheduledEmail from "./attendee-scheduled-email";
@@ -18,7 +18,7 @@ export default class AttendeeCancelledEmail extends AttendeeScheduledEmail {
       ...getReplyToHeader(this.calEvent),
       subject: `${this.t("event_cancelled_subject", {
         title: this.calEvent.title,
-        date: this.getFormattedDate(),
+        date: formatCancellationDate(this.calEvent, this.attendee),
       })}`,
       html: await this.getHtml(this.calEvent, this.attendee),
       text: this.getTextBody("event_request_cancelled", "emailed_you_and_any_other_attendees"),
