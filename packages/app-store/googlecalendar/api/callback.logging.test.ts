@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   upsert: vi.fn(),
   capture: vi.fn(),
   wrap: vi.fn(),
+  keys: vi.fn(),
+  construct: vi.fn(),
+  authUrl: vi.fn(),
 }));
 vi.mock("@calcom/lib/logger", () => {
   const logger = {
@@ -31,6 +34,10 @@ vi.mock("@calcom/lib/server/perfObserver", () => ({ performance: { mark: vi.fn()
 vi.mock("@sentry/nextjs", () => ({ captureException: mocks.capture, wrapApiHandlerWithSentry: mocks.wrap }));
 vi.mock("googleapis-common", () => ({
   OAuth2Client: class {
+    constructor(...args: unknown[]) {
+      mocks.construct(...args);
+    }
+    generateAuthUrl = mocks.authUrl;
     getToken = mocks.token;
     setCredentials() {}
   },
@@ -44,7 +51,7 @@ vi.mock("@googleapis/oauth2", () => ({
   },
 }));
 vi.mock("../lib/getGoogleAppKeys", () => ({
-  getGoogleAppKeys: async () => ({ client_id: "test", client_secret: "synthetic-client-secret" }),
+  getGoogleAppKeys: mocks.keys,
 }));
 vi.mock("../lib/CalendarService", () => ({
   createGoogleCalendarServiceWithGoogleType: () => ({
@@ -70,6 +77,8 @@ import { ErrorWithCode } from "@calcom/lib/errors";
 import { HttpError } from "@calcom/lib/http-error";
 import { defaultResponder } from "@calcom/lib/server/defaultResponder";
 import { TracedError } from "@calcom/lib/tracing/error";
+import { decodeOAuthState } from "../../_utils/oauth/decodeOAuthState";
+import add from "./add";
 import callback from "./callback";
 
 const secrets = [
@@ -133,6 +142,170 @@ beforeEach(() => {
   mocks.create.mockResolvedValue({ id: 1, key: token });
   mocks.primary.mockResolvedValue({ id: "primary" });
   mocks.profile.mockResolvedValue({ data: {} });
+  mocks.keys.mockResolvedValue({ client_id: "test", client_secret: secrets[4] });
+  mocks.authUrl.mockReturnValue("https://accounts.google.com/synthetic-consent");
+});
+
+function noProviderEffects() {
+  for (const effect of [
+    mocks.keys,
+    mocks.construct,
+    mocks.token,
+    mocks.create,
+    mocks.primary,
+    mocks.profile,
+    mocks.upsert,
+  ]) {
+    expect(effect).not.toHaveBeenCalled();
+  }
+}
+
+describe("Google signed-state enforcement", () => {
+  it.each([
+    undefined,
+    ["synthetic-state-secret"],
+    "synthetic-state-secret",
+    "null",
+    "[]",
+    '"scalar"',
+    "{}",
+  ])("rejects missing or malformed callback state %s before any side effect", async (state) => {
+    const req = request();
+    req.query.state = state;
+    const res = response();
+    await callback(req, res as unknown as NextApiResponse);
+    expect(res.status).toHaveBeenCalledWith(400);
+    noProviderEffects();
+    safeOutput(res);
+  });
+
+  it.each(["tampered", "other-user", "bad-options", "no-secret"])("rejects %s state", async (kind) => {
+    const req = request();
+    const state = JSON.parse(String(req.query.state));
+    if (kind === "tampered") state.nonceHash = "0".repeat(64);
+    if (kind === "other-user") {
+      state.nonceHash = createHmac("sha256", secrets[6]).update(`${secrets[1]}:2`).digest("hex");
+    }
+    if (kind === "bad-options") state.returnTo = [returnTo];
+    if (kind === "no-secret") vi.stubEnv("NEXTAUTH_SECRET", "");
+    req.query.state = JSON.stringify(state);
+    const res = response();
+    await callback(req, res as unknown as NextApiResponse);
+    expect(res.status).toHaveBeenCalledWith(400);
+    noProviderEffects();
+    safeOutput(res);
+  });
+
+  it("requires the authenticated user before callback side effects", async () => {
+    const req = request();
+    req.session = null;
+    const res = response();
+    await callback(req, res as unknown as NextApiResponse);
+    expect(res.status).toHaveBeenCalledWith(401);
+    noProviderEffects();
+    safeOutput(res);
+  });
+
+  it.each([
+    undefined,
+    "synthetic-code-secret",
+  ])("handles provider refusal without exchanging code %s", async (code) => {
+    const req = request();
+    req.query.code = code;
+    req.query.error = "access_denied";
+    const res = response();
+    await callback(req, res as unknown as NextApiResponse);
+    expect(res.redirect).toHaveBeenCalledWith(returnTo);
+    noProviderEffects();
+    safeOutput(res);
+  });
+
+  it.each([
+    undefined,
+    "{}",
+    JSON.stringify({
+      fromApp: true,
+      returnTo,
+      onErrorReturnTo: returnTo,
+      teamId: 2,
+      defaultInstall: true,
+      installGoogleVideo: true,
+    }),
+  ])("always signs add options %s", async (options) => {
+    const req = request();
+    req.session = { user: { id: 1, email: "synthetic@example.test" } } as NonNullable<
+      NextApiRequest["session"]
+    >;
+    req.query = options === undefined ? {} : { state: options };
+    req.url = `/api/integrations/google_calendar/add?state=${encodeURIComponent(options ?? "")}`;
+    const res = response();
+    await add(req, res as unknown as NextApiResponse);
+    expect(res.status).toHaveBeenCalledWith(200);
+    const generated = mocks.authUrl.mock.calls[0][0];
+    expect(generated).toMatchObject({ access_type: "offline", prompt: "consent" });
+    const callbackReq = request();
+    callbackReq.query = { state: generated.state };
+    const decoded = decodeOAuthState(callbackReq);
+    expect(decoded).toMatchObject({
+      nonce: expect.any(String),
+      nonceHash: expect.any(String),
+      ...JSON.parse(options ?? "{}"),
+    });
+    expect(mocks.token).not.toHaveBeenCalled();
+    expect(mocks.create).not.toHaveBeenCalled();
+    safeOutput(res);
+  });
+
+  it.each([
+    ["synthetic-state-secret"],
+    "synthetic-state-secret",
+    "null",
+    "[]",
+    '{"returnTo":42}',
+    '{"returnTo":"javascript:alert(1)"}',
+  ])("rejects invalid add input %s safely", async (state) => {
+    const req = request();
+    req.session = { user: { id: 1, email: "synthetic@example.test" } } as NonNullable<
+      NextApiRequest["session"]
+    >;
+    req.query = { state };
+    const res = response();
+    await add(req, res as unknown as NextApiResponse);
+    expect(res.status).toHaveBeenCalledWith(400);
+    noProviderEffects();
+    safeOutput(res);
+  });
+
+  it("refuses to issue unsigned state when signing configuration is absent", async () => {
+    const req = request();
+    req.session = { user: { id: 1, email: "synthetic@example.test" } } as NonNullable<
+      NextApiRequest["session"]
+    >;
+    req.query = {};
+    vi.stubEnv("NEXTAUTH_SECRET", "");
+    const res = response();
+    await add(req, res as unknown as NextApiResponse);
+    expect(res.status).toHaveBeenCalledWith(500);
+    noProviderEffects();
+    safeOutput(res);
+  });
+
+  it("uses no-options signed state for a declined callback without side effects", async () => {
+    const req = request();
+    req.session = { user: { id: 1, email: "synthetic@example.test" } } as NonNullable<
+      NextApiRequest["session"]
+    >;
+    req.query = {};
+    await add(req, response() as unknown as NextApiResponse);
+    const state = mocks.authUrl.mock.calls[0][0].state;
+    vi.clearAllMocks();
+    req.query = { state, error: "access_denied" };
+    const res = response();
+    await callback(req, res as unknown as NextApiResponse);
+    expect(res.redirect).toHaveBeenCalledWith(`${WEBAPP_URL}/apps/installed`);
+    noProviderEffects();
+    safeOutput(res);
+  });
 });
 afterEach(() => {
   vi.mocked(console.error).mockRestore();
