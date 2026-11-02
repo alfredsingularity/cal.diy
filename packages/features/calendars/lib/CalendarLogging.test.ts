@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   delete: vi.fn(),
   getCalendar: vi.fn(),
+  list: vi.fn(),
+  query: vi.fn(),
+  primary: vi.fn(),
 }));
 vi.mock("@calcom/lib/logger", () => {
   const logger = {
@@ -27,8 +30,16 @@ vi.mock("@calcom/lib/logger", () => {
 });
 vi.mock("@calcom/app-store/googlecalendar/lib/CalendarAuth", () => ({
   CalendarAuth: class {
+    authManager = {
+      request: async (request: () => Promise<Response>) => ({ json: await (await request()).json() }),
+    };
     async getClient() {
-      return { events: mocks };
+      return {
+        events: mocks,
+        freebusy: { query: mocks.query },
+        calendarList: { list: mocks.list },
+        calendars: { get: mocks.primary },
+      };
     }
   },
 }));
@@ -62,9 +73,18 @@ vi.mock("@calcom/features/crmManager/crmScheduler", () => ({ default: class {} }
 vi.mock("@calcom/features/flags/features.repository", () => ({ FeaturesRepository: class {} }));
 vi.mock("@calcom/prisma", () => ({ prisma: {} }));
 
-import BuildCalendarService from "@calcom/app-store/googlecalendar/lib/CalendarService";
+import BuildCalendarService, {
+  createGoogleCalendarServiceWithGoogleType,
+} from "@calcom/app-store/googlecalendar/lib/CalendarService";
 import EventManager from "@calcom/features/bookings/lib/EventManager";
-import { createEvent, deleteEvent, updateEvent } from "@calcom/features/calendars/lib/CalendarManager";
+import {
+  createEvent,
+  deleteEvent,
+  getBusyCalendarTimes,
+  getCalendarCredentials,
+  getConnectedCalendars,
+  updateEvent,
+} from "@calcom/features/calendars/lib/CalendarManager";
 
 const sentinels = [
   "synthetic-access-secret",
@@ -132,6 +152,8 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(mocks.log);
   mocks.getCalendar.mockResolvedValue(BuildCalendarService(credential));
   mocks.insert.mockResolvedValue({ data: created });
+  mocks.list.mockResolvedValue({ data: { items: [{ id: "primary", timeZone: "UTC" }] } });
+  mocks.query.mockResolvedValue({ status: 200, statusText: "OK", data: { calendars: {} } });
 });
 
 afterEach(() => vi.mocked(console.error).mockRestore());
@@ -241,5 +263,77 @@ describe("calendar lifecycle logging", () => {
     mocks.delete.mockRejectedValue({ code: 404 });
     await expect(BuildCalendarService(credential).deleteEvent("synthetic", event)).resolves.toBeUndefined();
     expectSafeLogs();
+  });
+});
+
+describe("Google discovery logging", () => {
+  const params = {
+    dateFrom: event.startTime,
+    dateTo: event.endTime,
+    selectedCalendars: [
+      { externalId: "primary", integration: "google_calendar", credentialId: 1, userId: 1 },
+    ],
+    mode: "slots" as const,
+  };
+  for (const asError of [false, true]) {
+    it.each(["availability", "timezone availability", "list", "primary"])(
+      "redacts %s errors (Error-derived: " + asError + ") and preserves rejection",
+      async (operation) => {
+        const error = failure(asError);
+        const service = createGoogleCalendarServiceWithGoogleType(credential);
+        mocks.query.mockRejectedValue(error);
+        mocks.primary.mockRejectedValue(error);
+        if (operation === "list") mocks.list.mockRejectedValue(error);
+        const result =
+          operation === "availability"
+            ? service.getAvailability(params)
+            : operation === "timezone availability"
+              ? service.getAvailabilityWithTimeZones?.(params)
+              : operation === "list"
+                ? service.listCalendars()
+                : service.getPrimaryCalendar();
+        await expect(result).rejects.toBe(error);
+        expectSafeLogs();
+      }
+    );
+  }
+  it("keeps discovery error fallback safe for the connected calendars UI", async () => {
+    mocks.list.mockRejectedValue(failure(true));
+    const result = await getConnectedCalendars(getCalendarCredentials([credential]), []);
+    expect(result.connectedCalendars[0].error?.message).toBe("Could not get connected calendars");
+    expectSafeLogs();
+  });
+  it("keeps the conservative busy-time fallback without logging upstream errors", async () => {
+    const module = await import("@calcom/features/calendars/lib/getCalendarsEvents");
+    vi.mocked(module.default).mockRejectedValueOnce(failure(true));
+    const result = await getBusyCalendarTimes(
+      [credential],
+      event.startTime,
+      event.endTime,
+      params.selectedCalendars
+    );
+    expect(result).toMatchObject({ success: false, data: [{ source: "error-placeholder" }] });
+    expectSafeLogs();
+  });
+  it.each([
+    "production",
+    "development",
+  ])("omits credential payloads from availability diagnostics in %s", async (environment) => {
+    vi.stubEnv("NODE_ENV", environment);
+    try {
+      const module = await vi.importActual<
+        typeof import("@calcom/features/calendars/lib/getCalendarsEvents")
+      >("@calcom/features/calendars/lib/getCalendarsEvents");
+      expect(
+        await module.default([credential], event.startTime, event.endTime, params.selectedCalendars, "slots")
+      ).toEqual([[]]);
+      expect(mocks.getCalendar).toHaveBeenLastCalledWith(
+        expect.objectContaining({ key: credential.key }),
+        "slots"
+      );
+      expectSafeLogs();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

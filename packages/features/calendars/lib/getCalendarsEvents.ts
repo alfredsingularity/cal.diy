@@ -4,7 +4,7 @@ import { symmetricDecrypt } from "@calcom/lib/crypto";
 import { decryptSecret } from "@calcom/lib/crypto/keyring";
 import { isDelegationCredential } from "@calcom/lib/delegationCredential";
 import logger from "@calcom/lib/logger";
-import { getPiiFreeCredential, getPiiFreeSelectedCalendar } from "@calcom/lib/piiFreeData";
+import { getPiiFreeSelectedCalendar } from "@calcom/lib/piiFreeData";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import { performance } from "@calcom/lib/server/perfObserver";
 import type { CalendarFetchMode, EventBusyDate, SelectedCalendar } from "@calcom/types/Calendar";
@@ -210,9 +210,9 @@ const getCalendarsEvents = async (
   log.debug(
     "Result",
     safeStringify({
-      calendarCredentials: calendarCredentials.map(getPiiFreeCredential),
-      selectedCalendars: selectedCalendars.map(getPiiFreeSelectedCalendar),
-      calendarEvents: awaitedResults,
+      credentialCount: calendarCredentials.length,
+      selectedCalendarCount: selectedCalendars.length,
+      eventCount: awaitedResults.reduce((total, events) => total + events.length, 0),
     })
   );
   return awaitedResults;

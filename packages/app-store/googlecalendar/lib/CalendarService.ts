@@ -22,7 +22,6 @@ import type {
 import type { CredentialForCalendarServiceWithEmail } from "@calcom/types/Credential";
 import type { calendar_v3 } from "@googleapis/calendar";
 import { RRule } from "rrule";
-
 import { AxiosLikeResponseToFetchResponse } from "../../_utils/oauth/AxiosLikeResponseToFetchResponse";
 import { CalendarAuth } from "./CalendarAuth";
 import { getEnrichmentFailureDiagnostic } from "./getEnrichmentFailureDiagnostic";
@@ -593,10 +592,10 @@ class GoogleCalendarService implements Calendar {
 
       return freeBusyDataWithTimeZone;
     } catch (error) {
-      this.log.error(
-        "There was an error getting availability from google calendar: ",
-        safeStringify({ error, selectedCalendars })
-      );
+      this.log.error("There was an error getting availability from google calendar: ", {
+        ...getCalendarErrorDiagnostic(error),
+        selectedCalendarCount: selectedCalendars.length,
+      });
       throw error;
     }
   }
@@ -715,10 +714,10 @@ class GoogleCalendarService implements Calendar {
       const calendarIds = await this.getCalendarIds(selectedCalendarIds, fallbackToPrimary);
       return await this.fetchAvailabilityData(calendarIds, dateFrom, dateTo);
     } catch (error) {
-      this.log.error(
-        "There was an error getting availability from google calendar: ",
-        safeStringify({ error, selectedCalendars })
-      );
+      this.log.error("There was an error getting availability from google calendar: ", {
+        ...getCalendarErrorDiagnostic(error),
+        selectedCalendarCount: selectedCalendars.length,
+      });
       throw error;
     }
   }
@@ -755,7 +754,7 @@ class GoogleCalendarService implements Calendar {
           }) satisfies IntegrationCalendar
       );
     } catch (error) {
-      this.log.error("There was an error getting calendars: ", safeStringify(error));
+      this.log.error("There was an error getting calendars: ", getCalendarErrorDiagnostic(error));
       throw error;
     }
   }
@@ -814,10 +813,10 @@ class GoogleCalendarService implements Calendar {
     data: Omit<Prisma.SelectedCalendarUncheckedCreateInput, "integration" | "credentialId" | "userId">,
     eventTypeIds: SelectedCalendarEventTypeIds
   ) {
-    log.debug(
-      "upsertSelectedCalendarsForEventTypeIds",
-      safeStringify({ data, eventTypeIds, credential: this.credential })
-    );
+    log.debug("upsertSelectedCalendarsForEventTypeIds", {
+      eventTypeCount: eventTypeIds.length,
+      hasUser: !!this.credential.userId,
+    });
     if (!this.credential.userId) {
       logger.error("upsertSelectedCalendarsForEventTypeIds failed. userId is missing.");
       return;
@@ -856,7 +855,7 @@ class GoogleCalendarService implements Calendar {
 
       return allCalendars;
     } catch (error) {
-      logger.error("Error fetching all Google Calendars", { error });
+      logger.error("Error fetching all Google Calendars", getCalendarErrorDiagnostic(error));
       throw error;
     }
   }
@@ -870,7 +869,7 @@ class GoogleCalendarService implements Calendar {
       return response.data;
     } catch (error) {
       // should not be reached because Google Cal always has a primary cal
-      logger.error("Error getting primary calendar", { error });
+      logger.error("Error getting primary calendar", getCalendarErrorDiagnostic(error));
       throw error;
     }
   }
@@ -884,7 +883,7 @@ class GoogleCalendarService implements Calendar {
       }
       return primaryCalendar.timeZone;
     } catch (error) {
-      this.log.error("Error getting main timezone from Google Calendar", { error });
+      this.log.error("Error getting main timezone from Google Calendar", getCalendarErrorDiagnostic(error));
       throw error;
     }
   }
