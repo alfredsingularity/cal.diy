@@ -314,6 +314,12 @@ const nextConfig = (phase: string): NextConfig => {
     async rewrites() {
       const { orgSlug } = nextJsOrgRewriteConfig;
       const beforeFiles = [
+        // Proxy loses RSC suffixes; this phase still sees them before any application handler runs.
+        ...["/:path*.rsc", "/:path*.segments/:segment*"].map((source) => ({
+          source,
+          has: [{ type: "header" as const, key: "x-cal-renewal-route-guard", value: "1" }],
+          destination: "/api/renewal-maintenance-unavailable",
+        })),
         {
           source: `/(${locales.join("|")})/:path*`,
           destination: "/:path*",

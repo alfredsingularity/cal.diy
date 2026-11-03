@@ -3,7 +3,7 @@ import { getCspHeader, getCspNonce } from "@lib/csp";
 import { get } from "@vercel/edge-config";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { isLegacyProxyPath, renewalMaintenanceResponse } from "./renewal-maintenance";
+import { isLegacyProxyPath, renewalMaintenanceResponse, setRenewalRoutingGuard } from "./renewal-maintenance";
 
 const safeGet = async <T = any>(key: string): Promise<T | undefined> => {
   try {
@@ -69,7 +69,12 @@ const shouldEnforceCsp = (url: URL) => {
 const proxy = async (req: NextRequest): Promise<NextResponse<unknown>> => {
   const maintenanceResponse = await renewalMaintenanceResponse(req);
   if (maintenanceResponse) return maintenanceResponse;
-  if (!isLegacyProxyPath(req.nextUrl.pathname)) return NextResponse.next();
+  const routingGuardChanged = setRenewalRoutingGuard(req.headers);
+  if (!isLegacyProxyPath(req.nextUrl.pathname)) {
+    return routingGuardChanged
+      ? NextResponse.next({ request: { headers: req.headers } })
+      : NextResponse.next();
+  }
 
   const url = req.nextUrl;
   const reqWithEnrichedHeaders = enrichRequestWithHeaders({ req });

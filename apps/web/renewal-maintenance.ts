@@ -15,7 +15,7 @@ const googlePaths = new Set([
   "/api/integrations/googlecalendar/callback",
 ]);
 
-function unavailable() {
+export function renewalMaintenanceUnavailable() {
   return new NextResponse(
     "Booking is temporarily unavailable. Please try again shortly.\n" +
       "Buchungen sind vorübergehend nicht verfügbar. Bitte versuchen Sie es in Kürze erneut.\n" +
@@ -39,6 +39,13 @@ export async function renewalMaintenanceResponse(req: NextRequest): Promise<Next
   // Next may normalize data/RSC paths first; never trust client-supplied routing headers.
   const pathname = new URL(req.url).pathname;
   const readOnly = req.method === "GET" || req.method === "HEAD";
+  // A normalized data GET can still mutate credentials through Google's callback.
+  if (
+    req.headers.get("x-nextjs-data") === "1" &&
+    !((readOnly && readPages.has(pathname)) || (req.method === "GET" && readAuth.has(pathname)))
+  ) {
+    return renewalMaintenanceUnavailable();
+  }
   const staticAsset =
     staticFiles.has(pathname) || (pathname.startsWith("/_next/static/") && !/[\\%]/.test(pathname));
   if (readOnly && (readPages.has(pathname) || staticAsset)) return null;
@@ -57,7 +64,17 @@ export async function renewalMaintenanceResponse(req: NextRequest): Promise<Next
       }
     }
   }
-  return unavailable();
+  return renewalMaintenanceUnavailable();
+}
+
+export function setRenewalRoutingGuard(headers: Headers) {
+  const marker = "x-cal-renewal-route-guard";
+  const mode = process.env.GOOGLE_RENEWAL_MAINTENANCE;
+  const enabled = Boolean(mode && mode !== "0");
+  const changed = enabled || headers.has(marker);
+  if (enabled) headers.set(marker, "1");
+  else headers.delete(marker);
+  return changed;
 }
 
 export function isLegacyProxyPath(pathname: string) {

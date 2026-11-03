@@ -1,10 +1,12 @@
 import "next/dist/server/node-environment";
 
 import { get as edgeConfigGet } from "@vercel/edge-config";
+import type { NextApiRequest, NextApiResponse } from "next";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 import { encode, type JWT } from "next-auth/jwt";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import unavailableHandler, { config as unavailableConfig } from "./pages/api/renewal-maintenance-unavailable";
 import proxy, { config } from "./proxy";
 
 vi.mock("@vercel/edge-config", () => ({ get: vi.fn() }));
@@ -64,6 +66,58 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Google renewal isolation", () => {
+  it.each(["GET", "POST", "DELETE"])("returns fixed 503 from the rewrite target for %s", async (method) => {
+    expect(unavailableConfig.api.bodyParser).toBe(false);
+    const headers = new Headers();
+    const response = {
+      status: vi.fn(),
+      send: vi.fn(),
+      setHeader: (key: string, value: string) => headers.set(key, value),
+    };
+    response.status.mockReturnValue(response);
+    await unavailableHandler(
+      { method, url: "/api/renewal-maintenance-unavailable?private=synthetic" } as NextApiRequest,
+      response as unknown as NextApiResponse
+    );
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(headers.get("cache-control")).toBe("no-store");
+    expect(headers.get("retry-after")).toBe("60");
+    expect(headers.get("x-cal-renewal-maintenance")).toBe("1");
+    expect(response.send.mock.calls[0][0]).toMatch(/Booking.*\nBuchungen.*\nLe prenotazioni/);
+    expect(response.send.mock.calls[0][0]).not.toContain("synthetic");
+  });
+  it("rejects normalized data mutations before the canonical credentials allowlist", async () => {
+    const response = await proxy(request("/api/auth/callback/credentials", "POST", { "x-nextjs-data": "1" }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-cal-renewal-maintenance")).toBe("1");
+  });
+
+  it.each(googlePaths)("rejects normalized data GET %s even for the valid owner", async (path) => {
+    const headers = { ...(await ownerHeaders()), "x-nextjs-data": "1" };
+    const response = await proxy(request(path, "GET", headers));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-cal-renewal-maintenance")).toBe("1");
+  });
+
+  it("preserves only the supported read-only auth data aliases", async () => {
+    const headers = { "x-nextjs-data": "1" };
+    for (const path of ["/auth/login", "/login", "/auth/error"]) {
+      expect((await proxy(request(path, "GET", headers))).status).toBe(200);
+      expect((await proxy(request(path, "HEAD", headers))).status).toBe(200);
+    }
+    for (const path of ["/api/auth/providers", "/api/auth/csrf", "/api/auth/session"]) {
+      expect((await proxy(request(path, "GET", headers))).status).toBe(200);
+      expect((await proxy(request(path, "HEAD", headers))).status).toBe(503);
+    }
+    expect((await proxy(request("/favicon.ico", "GET", headers))).status).toBe(503);
+  });
+
+  it("overwrites a forged routing marker on allowed requests", async () => {
+    const response = await proxy(request("/api/auth/csrf", "GET", { "x-cal-renewal-route-guard": "0" }));
+    expect(response.headers.get("x-middleware-request-x-cal-renewal-route-guard")).toBe("1");
+    expect(response.headers.get("x-middleware-override-headers")).toContain("x-cal-renewal-route-guard");
+    expect(response.headers.get("x-cal-renewal-route-guard")).toBeNull();
+  });
   it.each(blockedPaths)("matches and rejects %s before legacy proxy work", async (path) => {
     expect(unstable_doesMiddlewareMatch({ config, url: `${origin}${path}` })).toBe(true);
     const response = await proxy(request(path));
@@ -181,6 +235,19 @@ describe("Google renewal isolation", () => {
 });
 
 describe("disabled gate preserves original proxy scope", () => {
+  it("removes the routing marker from both legacy and other paths while off", async () => {
+    vi.stubEnv("GOOGLE_RENEWAL_MAINTENANCE", "0");
+    for (const path of ["/auth/login", "/api/auth/csrf", "/business-automations/free-audit"]) {
+      const response = await proxy(
+        request(path, "GET", { host: "book.example.test", "x-cal-renewal-route-guard": "1" })
+      );
+      expect(response.headers.get("x-middleware-override-headers")).not.toBeNull();
+      expect(response.headers.get("x-middleware-override-headers")).not.toContain(
+        "x-cal-renewal-route-guard"
+      );
+      expect(response.headers.get("x-middleware-request-x-cal-renewal-route-guard")).toBeNull();
+    }
+  });
   it.each([undefined, "", "0"])("does not gate when mode is %s", async (mode) => {
     vi.stubEnv("GOOGLE_RENEWAL_MAINTENANCE", mode);
     const response = await proxy(request("/api/book/event", "POST"));
