@@ -272,6 +272,48 @@ describe("next.config.ts - explicit production HSTS", () => {
     return (await config(phase).headers?.()) ?? [];
   }
 
+  it("guards alternate RSC paths before existing rewrites only with the proxy marker", async () => {
+    const { default: createConfig } = await import("../../next.config");
+    const rewrites = await createConfig(PHASE_PRODUCTION_BUILD).rewrites?.();
+    if (!rewrites || Array.isArray(rewrites)) throw new Error("Expected phased rewrites");
+    const beforeFiles = rewrites.beforeFiles ?? [];
+    const guards = beforeFiles.slice(0, 2);
+    expect(guards.map((rule) => rule.source)).toEqual(["/:path*.rsc", "/:path*.segments/:segment*"]);
+    expect(beforeFiles[2].destination).toBe("/:path*");
+    for (const path of [
+      "/auth/login.rsc",
+      "/auth/login.rsc/",
+      "/auth/login.segments/a.segment.rsc",
+      "/auth/login.segments/",
+      "/api/auth/callback/credentials.rsc",
+      "/api/integrations/googlecalendar/callback.rsc",
+    ]) {
+      for (const marker of [undefined, "0", "1"]) {
+        const req = new IncomingMessage(new Socket());
+        if (marker) req.headers["x-cal-renewal-route-guard"] = marker;
+        try {
+          const selected = guards.find((rule) => match(rule.source)(path) && matchHas(req, {}, rule.has));
+          expect(selected?.destination, `${path}:${marker}`).toBe(
+            marker === "1" ? "/api/renewal-maintenance-unavailable" : undefined
+          );
+        } finally {
+          req.destroy();
+        }
+      }
+    }
+    for (const path of [
+      "/auth/login",
+      "/api/auth/callback/credentials",
+      "/api/auth/csrf",
+      "/api/integrations/googlecalendar/callback",
+    ]) {
+      expect(
+        guards.some((rule) => match(rule.source)(path)),
+        path
+      ).toBe(false);
+    }
+  });
+
   it.each([
     PHASE_PRODUCTION_BUILD,
     PHASE_PRODUCTION_SERVER,
